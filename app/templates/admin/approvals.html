@@ -1,0 +1,464 @@
+{% extends "base.html" %}
+{% block title %}待审批事项 - 入党文档管理系统{% endblock %}
+
+{% block content %}
+<div class="approvals-page">
+    <div class="page-header">
+        <h1 class="page-title">待审批事项</h1>
+        <p class="page-subtitle">管理和审核入党申请流程</p>
+    </div>
+
+    <!-- 筛选区域 -->
+    <div class="card filter-card">
+        <div class="card-body">
+            <form class="filter-form" method="GET" action="{{ url_for('admin.approvals') }}">
+                <div class="filter-row">
+                    <!-- 状态筛选 -->
+                    <div class="filter-group">
+                        <label class="filter-label">审批状态</label>
+                        <select name="status" class="form-control filter-select">
+                            <option value="">全部状态</option>
+                            <option value="pending" {% if request.args.get('status') == 'pending' %}selected{% endif %}>待审批</option>
+                            <option value="approved" {% if request.args.get('status') == 'approved' %}selected{% endif %}>已通过</option>
+                            <option value="rejected" {% if request.args.get('status') == 'rejected' %}selected{% endif %}>已拒绝</option>
+                        </select>
+                    </div>
+
+                    <!-- 支部筛选 -->
+                    <div class="filter-group">
+                        <label class="filter-label">所属支部</label>
+                        <select name="branch" class="form-control filter-select">
+                            <option value="">全部支部</option>
+                            {% for branch in branches %}
+                            <option value="{{ branch.id }}" {% if request.args.get('branch') == branch.id|string %}selected{% endif %}>{{ branch.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- 搜索框 -->
+                    <div class="filter-group filter-search">
+                        <label class="filter-label">搜索申请人</label>
+                        <input type="text" name="search" class="form-control" placeholder="输入姓名搜索..." value="{{ request.args.get('search', '') }}">
+                    </div>
+
+                    <!-- 操作按钮 -->
+                    <div class="filter-actions">
+                        <button type="submit" class="btn btn-primary">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <path d="m21 21-4.35-4.35"></path>
+                            </svg>
+                            筛选
+                        </button>
+                        <a href="{{ url_for('admin.approvals') }}" class="btn btn-secondary">重置</a>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 审批列表 -->
+    <div class="card card-decorated">
+        <div class="card-header">
+            <h3 class="card-title">审批列表</h3>
+            <div class="list-summary">
+                共 <span class="highlight">{{ approvals|length if approvals else 0 }}</span> 条记录
+            </div>
+        </div>
+        <div class="card-body">
+            {% if approvals and approvals|length > 0 %}
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>申请人姓名</th>
+                            <th>所属支部</th>
+                            <th>当前阶段/步骤</th>
+                            <th>书记审批状态</th>
+                            <th>提交时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in applications %}
+                        <tr>
+                            <td>
+                                <div class="user-cell">
+                                    <div class="user-avatar-small">{{ item.user.name[0] if item.user and item.user.name else (item.user.username[0] if item.user else '?') }}</div>
+                                    <span class="user-name-text">{{ item.user.name if item.user and item.user.name else (item.user.username if item.user else '-') }}</span>
+                                </div>
+                            </td>
+                            <td>{{ item.branch.name if item.branch else '-' }}</td>
+                            <td>
+                                <div class="stage-info">
+                                    <span class="stage-badge">第{{ item.current_stage or 1 }}阶段</span>
+                                    {% if item.current_step %}
+                                    <span class="step-text">/ {{ item.current_step }}</span>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                {% if item.status == 'in_progress' %}
+                                <span class="badge badge-warning">进行中</span>
+                                {% elif item.status == 'completed' %}
+                                <span class="badge badge-success">已完成</span>
+                                {% elif item.status == 'cancelled' %}
+                                <span class="badge badge-danger">已取消</span>
+                                {% else %}
+                                <span class="badge badge-secondary">{{ item.status }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="time-text">{{ item.created_at.strftime('%Y-%m-%d %H:%M') if item.created_at else '-' }}</span>
+                            </td>
+                            <td>
+                                <div class="btn-group">
+                                    <a href="{{ url_for('admin.approval_detail', approval_id=item.id) }}" class="btn btn-sm btn-secondary">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                            <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                            <path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                                        </svg>
+                                        查看详情
+                                    </a>
+                                    {% if item.status == 'in_progress' %}
+                                    <a href="{{ url_for('admin.approval_review', approval_id=item.id) }}" class="btn btn-sm btn-primary">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                            <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        </svg>
+                                        审批
+                                    </a>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="empty-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
+                    </svg>
+                </div>
+                <h3 class="empty-title">暂无待审批事项</h3>
+                <p class="empty-desc">当前没有需要审批的申请，请稍后再来查看</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<style>
+/* 审批页面样式 */
+.approvals-page {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.page-header {
+    margin-bottom: var(--spacing-xl);
+}
+
+.page-title {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    font-weight: 600;
+    color: var(--color-primary-dark);
+    margin-bottom: var(--spacing-xs);
+}
+
+.page-subtitle {
+    color: var(--color-text-secondary);
+    font-size: 1rem;
+}
+
+/* 筛选卡片 */
+.filter-card {
+    margin-bottom: var(--spacing-lg);
+}
+
+.filter-card .card-body {
+    padding: var(--spacing-lg);
+}
+
+.filter-form {
+    width: 100%;
+}
+
+.filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-md);
+    align-items: flex-end;
+}
+
+.filter-group {
+    flex: 1;
+    min-width: 180px;
+}
+
+.filter-search {
+    flex: 1.5;
+    min-width: 220px;
+}
+
+.filter-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.filter-select {
+    min-width: 100%;
+}
+
+.filter-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: flex-end;
+    padding-top: 24px;
+}
+
+.filter-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+/* 列表摘要 */
+.list-summary {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+}
+
+.list-summary .highlight {
+    color: var(--color-primary);
+    font-weight: 600;
+}
+
+/* 表格响应式 */
+.table-responsive {
+    overflow-x: auto;
+}
+
+/* 表格样式 */
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 800px;
+}
+
+.table th,
+.table td {
+    padding: var(--spacing-md);
+    text-align: left;
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+.table th {
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+    background: var(--color-bg-gray);
+    white-space: nowrap;
+}
+
+.table tbody tr {
+    transition: background var(--transition-fast);
+}
+
+.table tbody tr:hover {
+    background: var(--color-bg-light);
+}
+
+.table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* 用户单元格 */
+.user-cell {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.user-avatar-small {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-text-light);
+    flex-shrink: 0;
+}
+
+.user-name-text {
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+/* 阶段信息 */
+.stage-info {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+}
+
+/* 阶段徽章 */
+.stage-badge {
+    display: inline-block;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: var(--color-bg-gray);
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+}
+
+.step-text {
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+}
+
+/* 徽章样式 */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.badge-warning {
+    background: rgba(218, 165, 32, 0.1);
+    color: var(--color-warning);
+}
+
+.badge-success {
+    background: rgba(46, 139, 87, 0.1);
+    color: var(--color-success);
+}
+
+.badge-danger {
+    background: rgba(220, 20, 60, 0.1);
+    color: var(--color-error);
+}
+
+.badge-secondary {
+    background: var(--color-bg-gray);
+    color: var(--color-text-muted);
+}
+
+/* 时间文本 */
+.time-text {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+}
+
+/* 按钮组 */
+.btn-group {
+    display: flex;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
+.btn-group .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    white-space: nowrap;
+}
+
+/* 空状态 */
+.empty-state {
+    text-align: center;
+    padding: var(--spacing-xxl) var(--spacing-lg);
+}
+
+.empty-icon {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto var(--spacing-lg);
+    color: var(--color-text-muted);
+    opacity: 0.4;
+}
+
+.empty-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.empty-title {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: var(--spacing-sm);
+}
+
+.empty-desc {
+    font-size: 0.9375rem;
+    color: var(--color-text-muted);
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+/* 响应式设计 */
+@media (max-width: 992px) {
+    .filter-row {
+        flex-direction: column;
+    }
+
+    .filter-group {
+        width: 100%;
+        min-width: auto;
+    }
+
+    .filter-search {
+        min-width: auto;
+    }
+
+    .filter-actions {
+        width: 100%;
+        padding-top: var(--spacing-md);
+    }
+
+    .filter-actions .btn {
+        flex: 1;
+        justify-content: center;
+    }
+}
+
+@media (max-width: 768px) {
+    .page-title {
+        font-size: 1.5rem;
+    }
+
+    .table th,
+    .table td {
+        padding: var(--spacing-sm);
+    }
+
+    .btn-group {
+        flex-direction: column;
+    }
+
+    .btn-group .btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+</style>
+{% endblock %}

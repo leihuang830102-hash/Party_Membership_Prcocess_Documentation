@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="入党文档管理系统 - 管理党员发展全流程">
+    <title>入党文档管理系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="home-page">
+    <!-- 英雄区域 -->
+    <section class="home-hero">
+        <div class="home-hero-content">
+            <h1 class="home-title">入党文档管理系统</h1>
+            <p class="home-subtitle">规范党员发展流程，助力党建工作数字化</p>
+
+            <div class="home-actions">
+                <a href="{{ url_for('auth.login') }}" class="btn btn-lg btn-accent">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+                        <polyline points="10 17 15 12 10 7"/>
+                        <line x1="15" y1="12" x2="3" y2="12"/>
+                    </svg>
+                    登录系统
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- 功能介绍 -->
+    <section class="home-features">
+        <div class="home-features-inner">
+            <h2 class="home-features-title">系统功能</h2>
+            <div class="home-features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                            <circle cx="9" cy="7" r="4"/>
+                            <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">发展流程管理</h3>
+                    <p class="feature-desc">完整覆盖党员发展5阶段26步骤，全流程数字化跟踪管理</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                            <polyline points="10 9 9 9 8 9"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">文档模板管理</h3>
+                    <p class="feature-desc">提供标准化入党文档模板，支持Word格式在线生成与导出</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                            <line x1="16" y1="2" x2="16" y2="6"/>
+                            <line x1="8" y1="2" x2="8" y2="6"/>
+                            <line x1="3" y1="10" x2="21" y2="10"/>
+                            <path d="M8 14h.01"/>
+                            <path d="M12 14h.01"/>
+                            <path d="M16 14h.01"/>
+                            <path d="M8 18h.01"/>
+                            <path d="M12 18h.01"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">时间节点提醒</h3>
+                    <p class="feature-desc">自动提醒关键时间节点，确保发展流程合规有序进行</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 20V10"/>
+                            <path d="M18 20V4"/>
+                            <path d="M6 20v-4"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">数据统计分析</h3>
+                    <p class="feature-desc">多维度数据统计分析，为党建工作决策提供数据支撑</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 页脚 -->
+    <footer class="footer">
+        <div class="footer-content">
+            <span>入党文档管理系统</span>
+            <span class="footer-divider"></span>
+            <span>版权所有</span>
+        </div>
+    </footer>
+</body>
+</html>

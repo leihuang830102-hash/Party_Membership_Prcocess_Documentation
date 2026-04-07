@@ -1,0 +1,729 @@
+{% extends "base.html" %}
+
+{% block title %}我的首页 - 入党文档管理系统{% endblock %}
+
+{% block extra_css %}
+<style>
+/* ========================================
+   申请人仪表盘样式
+   ======================================== */
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 400px;
+    gap: var(--spacing-xl);
+}
+
+@media (max-width: 1200px) {
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 状态卡片 */
+.status-card {
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    color: var(--color-text-light);
+    position: relative;
+    overflow: hidden;
+}
+
+.status-card::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(212, 175, 55, 0.15) 0%, transparent 40%);
+    pointer-events: none;
+}
+
+.status-card .card-header {
+    border-bottom-color: rgba(255, 255, 255, 0.2);
+}
+
+.status-card .card-title {
+    color: var(--color-text-light);
+}
+
+.status-card .card-title::before {
+    background: var(--color-accent);
+}
+
+.status-content {
+    position: relative;
+    z-index: 1;
+}
+
+.status-stage {
+    font-family: var(--font-display);
+    font-size: 1.75rem;
+    font-weight: 600;
+    margin-bottom: var(--spacing-sm);
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.status-step {
+    font-size: 1rem;
+    opacity: 0.9;
+    margin-bottom: var(--spacing-md);
+}
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: var(--radius-lg);
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.status-badge .badge-icon {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.3); opacity: 0.7; }
+}
+
+/* 时间线样式 */
+.timeline-card {
+    min-height: 600px;
+}
+
+.timeline {
+    position: relative;
+    padding: var(--spacing-md) 0;
+}
+
+.timeline::before {
+    content: '';
+    position: absolute;
+    left: 20px;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: linear-gradient(180deg, var(--color-primary), var(--color-accent));
+    border-radius: 2px;
+}
+
+.timeline-phase {
+    margin-bottom: var(--spacing-lg);
+    position: relative;
+    padding-left: 50px;
+}
+
+.phase-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+    cursor: pointer;
+    user-select: none;
+}
+
+.phase-icon {
+    position: absolute;
+    left: 8px;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--color-primary);
+    color: var(--color-text-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(196, 30, 58, 0.3);
+    z-index: 1;
+}
+
+.phase-icon.completed {
+    background: var(--color-success);
+}
+
+.phase-icon.current {
+    background: var(--color-accent);
+    animation: pulse-icon 2s ease-in-out infinite;
+}
+
+@keyframes pulse-icon {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(212, 175, 55, 0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(212, 175, 55, 0); }
+}
+
+.phase-title {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.phase-toggle {
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    transition: transform var(--transition-fast);
+}
+
+.phase-header.expanded .phase-toggle {
+    transform: rotate(180deg);
+}
+
+.phase-steps {
+    display: none;
+    padding-left: var(--spacing-md);
+    border-left: 2px dashed var(--color-border);
+    margin-left: 3px;
+}
+
+.phase-steps.show {
+    display: block;
+}
+
+.step-item {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) 0;
+    color: var(--color-text-muted);
+    font-size: 0.875rem;
+}
+
+.step-item.completed {
+    color: var(--color-success);
+}
+
+.step-item.current {
+    color: var(--color-primary);
+    font-weight: 500;
+}
+
+.step-item.pending {
+    color: var(--color-text-muted);
+}
+
+.step-icon {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.step-item.completed .step-icon {
+    background: var(--color-success);
+    color: white;
+}
+
+.step-item.current .step-icon {
+    background: var(--color-primary);
+    color: white;
+    animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.step-item.pending .step-icon {
+    background: var(--color-border);
+    color: var(--color-text-muted);
+}
+
+.step-code {
+    font-weight: 500;
+    min-width: 30px;
+}
+
+/* 待办事项 */
+.todo-card .card-body {
+    padding: 0;
+}
+
+.todo-list {
+    list-style: none;
+}
+
+.todo-item {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-bottom: 1px solid var(--color-border-light);
+    transition: background var(--transition-fast);
+}
+
+.todo-item:last-child {
+    border-bottom: none;
+}
+
+.todo-item:hover {
+    background: var(--color-bg-light);
+}
+
+.todo-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 1rem;
+}
+
+.todo-icon.urgent {
+    background: linear-gradient(135deg, var(--color-error), #B01030);
+    color: var(--color-text-light);
+}
+
+.todo-icon.normal {
+    background: linear-gradient(135deg, var(--color-warning), #C49000);
+    color: var(--color-text-light);
+}
+
+.todo-icon.info {
+    background: linear-gradient(135deg, var(--color-info), #3058C8);
+    color: var(--color-text-light);
+}
+
+.todo-content {
+    flex: 1;
+}
+
+.todo-title {
+    font-weight: 500;
+    color: var(--color-text-primary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.todo-desc {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+}
+
+.todo-action {
+    flex-shrink: 0;
+}
+
+.todo-empty {
+    padding: var(--spacing-xxl);
+    text-align: center;
+    color: var(--color-text-muted);
+}
+
+.todo-empty-icon {
+    font-size: 3rem;
+    margin-bottom: var(--spacing-md);
+    opacity: 0.5;
+}
+
+/* 快捷操作 */
+.quick-actions {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--spacing-md);
+}
+
+.quick-action-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-lg);
+    background: var(--color-bg-light);
+    border: 2px solid var(--color-border-light);
+    border-radius: var(--radius-lg);
+    text-decoration: none;
+    color: var(--color-text-primary);
+    transition: all var(--transition-fast);
+}
+
+.quick-action-btn:hover {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-text-light);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.quick-action-icon {
+    font-size: 1.75rem;
+    margin-bottom: var(--spacing-sm);
+}
+
+.quick-action-text {
+    font-weight: 500;
+    font-size: 0.9375rem;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+    .dashboard-grid {
+        gap: var(--spacing-lg);
+    }
+
+    .status-stage {
+        font-size: 1.25rem;
+    }
+
+    .quick-actions {
+        grid-template-columns: 1fr;
+    }
+
+    .timeline::before {
+        left: 16px;
+    }
+
+    .timeline-phase {
+        padding-left: 42px;
+    }
+
+    .phase-icon {
+        left: 4px;
+        width: 24px;
+        height: 24px;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+    <!-- 左侧主要内容 -->
+    <div class="dashboard-main">
+        <!-- 状态卡片 -->
+        <div class="card card-decorated status-card mb-xl">
+            <div class="card-header">
+                <h2 class="card-title">当前申请状态</h2>
+                <a href="{{ url_for('applicant.progress') }}" class="btn btn-sm btn-outline" style="color: white; border-color: rgba(255,255,255,0.5);">查看详情</a>
+            </div>
+            <div class="card-body">
+                <div class="status-content">
+                    {% if current_step %}
+                    <div class="status-stage">{{ current_step.phase_name }}</div>
+                    <div class="status-step">当前步骤：{{ current_step.code }} - {{ current_step.name }}</div>
+                    <div class="status-badge">
+                        <span class="badge-icon"></span>
+                        <span>{{ '待提交材料' if current_step.needs_document else '进行中' }}</span>
+                    </div>
+                    {% else %}
+                    <div class="status-stage">准备开始</div>
+                    <div class="status-step">您尚未开始入党申请流程</div>
+                    <div class="status-badge">
+                        <span class="badge-icon"></span>
+                        <span>待开始</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 发展时间线 -->
+        <div class="card card-decorated timeline-card">
+            <div class="card-header">
+                <h2 class="card-title">发展时间线</h2>
+            </div>
+            <div class="card-body">
+                <div class="timeline">
+                    <!-- 第1阶段：递交入党申请书 -->
+                    <div class="timeline-phase">
+                        <div class="phase-header" onclick="togglePhase(this)">
+                            <div class="phase-icon {% if current_step and current_step.phase >= 1 %}completed{% elif current_step and current_step.phase == 1 %}current{% endif %}">1</div>
+                            <span class="phase-title">第一阶段：递交入党申请书</span>
+                            <span class="phase-toggle">&#9660;</span>
+                        </div>
+                        <div class="phase-steps {% if not current_step or current_step.phase <= 1 %}show{% endif %}">
+                            <div class="step-item {% if completed_steps and 'L1' in completed_steps %}completed{% elif current_step and current_step.code == 'L1' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L1' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L1' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L1</span>
+                                <span class="step-name">递交入党申请书</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 第2阶段：确定入党积极分子 -->
+                    <div class="timeline-phase">
+                        <div class="phase-header" onclick="togglePhase(this)">
+                            <div class="phase-icon {% if current_step and current_step.phase >= 2 %}completed{% elif current_step and current_step.phase == 2 %}current{% endif %}">2</div>
+                            <span class="phase-title">第二阶段：确定入党积极分子</span>
+                            <span class="phase-toggle">&#9660;</span>
+                        </div>
+                        <div class="phase-steps {% if current_step and current_step.phase == 2 %}show{% endif %}">
+                            <div class="step-item {% if completed_steps and 'L2' in completed_steps %}completed{% elif current_step and current_step.code == 'L2' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L2' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L2' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L2</span>
+                                <span class="step-name">党组织派人谈话</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L3' in completed_steps %}completed{% elif current_step and current_step.code == 'L3' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L3' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L3' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L3</span>
+                                <span class="step-name">支委会研究</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L4' in completed_steps %}completed{% elif current_step and current_step.code == 'L4' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L4' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L4' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L4</span>
+                                <span class="step-name">上级党委备案</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L5' in completed_steps %}completed{% elif current_step and current_step.code == 'L5' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L5' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L5' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L5</span>
+                                <span class="step-name">指定培养联系人</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L6' in completed_steps %}completed{% elif current_step and current_step.code == 'L6' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L6' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L6' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L6</span>
+                                <span class="step-name">确定入党积极分子</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 第3阶段：确定发展对象 -->
+                    <div class="timeline-phase">
+                        <div class="phase-header" onclick="togglePhase(this)">
+                            <div class="phase-icon {% if current_step and current_step.phase >= 3 %}completed{% elif current_step and current_step.phase == 3 %}current{% endif %}">3</div>
+                            <span class="phase-title">第三阶段：确定发展对象</span>
+                            <span class="phase-toggle">&#9660;</span>
+                        </div>
+                        <div class="phase-steps {% if current_step and current_step.phase == 3 %}show{% endif %}">
+                            <div class="step-item {% if completed_steps and 'L7' in completed_steps %}completed{% elif current_step and current_step.code == 'L7' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L7' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L7' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L7</span>
+                                <span class="step-name">一年以上培养教育考察</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L8' in completed_steps %}completed{% elif current_step and current_step.code == 'L8' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L8' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L8' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L8</span>
+                                <span class="step-name">听取党内外群众意见</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L9' in completed_steps %}completed{% elif current_step and current_step.code == 'L9' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L9' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L9' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L9</span>
+                                <span class="step-name">支委会讨论同意</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L10' in completed_steps %}completed{% elif current_step and current_step.code == 'L10' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L10' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L10' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L10</span>
+                                <span class="step-name">上级党委备案</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L11' in completed_steps %}completed{% elif current_step and current_step.code == 'L11' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L11' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L11' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L11</span>
+                                <span class="step-name">确定入党介绍人</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L12' in completed_steps %}completed{% elif current_step and current_step.code == 'L12' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L12' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L12' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L12</span>
+                                <span class="step-name">政治审查</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L13' in completed_steps %}completed{% elif current_step and current_step.code == 'L13' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L13' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L13' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L13</span>
+                                <span class="step-name">短期集中培训</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 第4阶段：确定预备党员 -->
+                    <div class="timeline-phase">
+                        <div class="phase-header" onclick="togglePhase(this)">
+                            <div class="phase-icon {% if current_step and current_step.phase >= 4 %}completed{% elif current_step and current_step.phase == 4 %}current{% endif %}">4</div>
+                            <span class="phase-title">第四阶段：确定预备党员</span>
+                            <span class="phase-toggle">&#9660;</span>
+                        </div>
+                        <div class="phase-steps {% if current_step and current_step.phase == 4 %}show{% endif %}">
+                            <div class="step-item {% if completed_steps and 'L14' in completed_steps %}completed{% elif current_step and current_step.code == 'L14' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L14' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L14' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L14</span>
+                                <span class="step-name">支部委员会审查</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L15' in completed_steps %}completed{% elif current_step and current_step.code == 'L15' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L15' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L15' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L15</span>
+                                <span class="step-name">上级党委预审</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L16' in completed_steps %}completed{% elif current_step and current_step.code == 'L16' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L16' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L16' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L16</span>
+                                <span class="step-name">填写入党志愿书</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L17' in completed_steps %}completed{% elif current_step and current_step.code == 'L17' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L17' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L17' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L17</span>
+                                <span class="step-name">支部大会讨论</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L18' in completed_steps %}completed{% elif current_step and current_step.code == 'L18' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L18' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L18' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L18</span>
+                                <span class="step-name">上级党委派人谈话</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L19' in completed_steps %}completed{% elif current_step and current_step.code == 'L19' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L19' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L19' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L19</span>
+                                <span class="step-name">上级党委审批</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L20' in completed_steps %}completed{% elif current_step and current_step.code == 'L20' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L20' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L20' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L20</span>
+                                <span class="step-name">预备党员入党宣誓</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 第5阶段：确定正式党员 -->
+                    <div class="timeline-phase">
+                        <div class="phase-header" onclick="togglePhase(this)">
+                            <div class="phase-icon {% if current_step and current_step.phase >= 5 %}completed{% elif current_step and current_step.phase == 5 %}current{% endif %}">5</div>
+                            <span class="phase-title">第五阶段：确定正式党员</span>
+                            <span class="phase-toggle">&#9660;</span>
+                        </div>
+                        <div class="phase-steps {% if current_step and current_step.phase == 5 %}show{% endif %}">
+                            <div class="step-item {% if completed_steps and 'L21' in completed_steps %}completed{% elif current_step and current_step.code == 'L21' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L21' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L21' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L21</span>
+                                <span class="step-name">一年预备期教育考察</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L22' in completed_steps %}completed{% elif current_step and current_step.code == 'L22' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L22' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L22' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L22</span>
+                                <span class="step-name">提出转正申请</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L23' in completed_steps %}completed{% elif current_step and current_step.code == 'L23' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L23' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L23' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L23</span>
+                                <span class="step-name">党内外群众意见</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L24' in completed_steps %}completed{% elif current_step and current_step.code == 'L24' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L24' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L24' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L24</span>
+                                <span class="step-name">支委会审查</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L25' in completed_steps %}completed{% elif current_step and current_step.code == 'L25' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L25' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L25' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L25</span>
+                                <span class="step-name">支部大会讨论</span>
+                            </div>
+                            <div class="step-item {% if completed_steps and 'L26' in completed_steps %}completed{% elif current_step and current_step.code == 'L26' %}current{% else %}pending{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L26' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L26' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                                <span class="step-code">L26</span>
+                                <span class="step-name">上级党委审批</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 右侧边栏 -->
+    <div class="dashboard-sidebar">
+        <!-- 待办事项 -->
+        <div class="card card-decorated todo-card mb-xl">
+            <div class="card-header">
+                <h2 class="card-title">待办事项</h2>
+            </div>
+            <div class="card-body">
+                {% if todos and todos|length > 0 %}
+                <ul class="todo-list">
+                    {% for todo in todos %}
+                    <li class="todo-item">
+                        <div class="todo-icon {{ todo.priority }}">
+                            {% if todo.priority == 'urgent' %}&#33;
+                            {% elif todo.priority == 'normal' %}&#9888;
+                            {% else %}&#8505;
+                            {% endif %}
+                        </div>
+                        <div class="todo-content">
+                            <div class="todo-title">{{ todo.title }}</div>
+                            {% if todo.description %}
+                            <div class="todo-desc">{{ todo.description }}</div>
+                            {% endif %}
+                        </div>
+                        {% if todo.action_url %}
+                        <div class="todo-action">
+                            <a href="{{ todo.action_url }}" class="btn btn-sm btn-primary">去完成</a>
+                        </div>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <div class="todo-empty">
+                    <div class="todo-empty-icon">&#128077;</div>
+                    <p>暂无待办事项</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 快捷操作 -->
+        <div class="card card-decorated">
+            <div class="card-header">
+                <h2 class="card-title">快捷操作</h2>
+            </div>
+            <div class="card-body">
+                <div class="quick-actions">
+                    <a href="{{ url_for('applicant.documents') }}" class="quick-action-btn">
+                        <span class="quick-action-icon">&#128196;</span>
+                        <span class="quick-action-text">我的文档</span>
+                    </a>
+                    <a href="{{ url_for('applicant.progress') }}" class="quick-action-btn">
+                        <span class="quick-action-icon">&#128200;</span>
+                        <span class="quick-action-text">发展进度</span>
+                    </a>
+                    <a href="#" class="quick-action-btn" onclick="alert('功能开发中'); return false;">
+                        <span class="quick-action-icon">&#128221;</span>
+                        <span class="quick-action-text">提交材料</span>
+                    </a>
+                    <a href="#" class="quick-action-btn" onclick="alert('功能开发中'); return false;">
+                        <span class="quick-action-icon">&#128172;</span>
+                        <span class="quick-action-text">联系管理员</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// 时间线折叠/展开功能
+function togglePhase(header) {
+    const steps = header.nextElementSibling;
+    const isExpanded = steps.classList.contains('show');
+
+    // 切换展开状态
+    if (isExpanded) {
+        steps.classList.remove('show');
+        header.classList.remove('expanded');
+    } else {
+        steps.classList.add('show');
+        header.classList.add('expanded');
+    }
+}
+
+// 页面加载时，自动展开当前阶段的折叠
+document.addEventListener('DOMContentLoaded', function() {
+    // 查找当前步骤所在的阶段并确保展开
+    const currentStep = document.querySelector('.step-item.current');
+    if (currentStep) {
+        const phaseSteps = currentStep.closest('.phase-steps');
+        const phaseHeader = phaseSteps.previousElementSibling;
+        if (phaseSteps && !phaseSteps.classList.contains('show')) {
+            phaseSteps.classList.add('show');
+            phaseHeader.classList.add('expanded');
+        }
+    }
+});
+</script>
+{% endblock %}
