@@ -1,0 +1,613 @@
+{% extends "base.html" %}
+{% block title %}审批详情 - 入党文档管理系统{% endblock %}
+
+{% block content %}
+<div class="approval-detail-page">
+    <div class="page-header">
+        <div class="header-left">
+            <a href="{{ url_for('admin.approvals') }}" class="btn btn-secondary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                    <path d="M19 12H5m7-7l-7 7 7 7"></path>
+                </svg>
+                返回列表
+            </a>
+        </div>
+        <h1 class="page-title">审批详情</h1>
+    </div>
+
+    <!-- 申请人信息 -->
+    <div class="card card-decorated mb-lg">
+        <div class="card-header">
+            <h3 class="card-title">申请人信息</h3>
+        </div>
+        <div class="card-body">
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">姓名</span>
+                    <span class="info-value">{{ application.user.name if application.user else '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">用户名</span>
+                    <span class="info-value">{{ application.user.username if application.user else '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">所属支部</span>
+                    <span class="info-value">{{ application.branch.name if application.branch else '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">申请日期</span>
+                    <span class="info-value">{{ application.apply_date.strftime('%Y-%m-%d') if application.apply_date else '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">当前阶段</span>
+                    <span class="info-value">第{{ application.current_stage }}阶段</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">当前步骤</span>
+                    <span class="info-value">{{ application.current_step }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">状态</span>
+                    <span class="info-value">
+                        {% if application.status == 'in_progress' %}
+                        <span class="badge badge-warning">进行中</span>
+                        {% elif application.status == 'completed' %}
+                        <span class="badge badge-success">已完成</span>
+                        {% elif application.status == 'cancelled' %}
+                        <span class="badge badge-danger">已取消</span>
+                        {% else %}
+                        <span class="badge badge-secondary">{{ application.status }}</span>
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 审批时间线 -->
+    <div class="card card-decorated mb-lg">
+        <div class="card-header">
+            <h3 class="card-title">审批进度</h3>
+        </div>
+        <div class="card-body">
+            <div class="timeline">
+                {% for step in timeline %}
+                {% set is_current_step = (step.step_code == application.current_step) %}
+                {% set is_failed_current = (step.status == 'failed' and is_current_step and application.status == 'in_progress') %}
+                <div class="timeline-item {% if step.status == 'completed' %}completed{% elif is_failed_current %}failed{% elif step.status == 'failed' %}failed{% elif is_current_step and application.status == 'in_progress' %}current{% endif %}">
+                    <div class="timeline-marker">
+                        {% if step.status == 'completed' %}
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                            <path d="M22 11.08V12a10 10 0 11-5.93-9.14"></path>
+                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        </svg>
+                        {% elif step.status == 'failed' %}
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="15" y1="9" x2="9" y2="15"></line>
+                            <line x1="9" y1="9" x2="15" y2="15"></line>
+                        </svg>
+                        {% else %}
+                        <span class="step-number">{{ loop.index }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="timeline-content">
+                        <div class="timeline-header">
+                            <span class="step-code">{{ step.step_code }}</span>
+                            <span class="step-name">{{ step.name }}</span>
+                            <span class="stage-badge">第{{ step.stage }}阶段</span>
+                        </div>
+                        <div class="timeline-body">
+                            {% if step.status == 'completed' %}
+                            <p class="status-text success">已完成 - {{ step.result or '审批通过' }}</p>
+                            <p class="time-text">{{ step.completed_at|cn_time if step.completed_at else '' }}</p>
+                            {% elif step.status == 'failed' %}
+                            <p class="status-text error">已驳回 - {{ step.result or '' }}</p>
+                            {% if is_failed_current %}
+                            {# Show re-approval buttons for the failed current step #}
+                            <p class="status-text current" style="margin-top: 4px;">当前步骤 - 等待重新审核</p>
+                            <div style="margin-top: 8px; display: flex; gap: 8px;">
+                                <a href="{{ url_for('admin.approval_review', approval_id=application.id, step_code=step.step_code) }}" class="btn btn-sm btn-success">重新审批</a>
+                            </div>
+                            {% endif %}
+                            {% else %}
+                            {% if is_current_step and application.status == 'in_progress' %}
+                            <p class="status-text current">当前步骤 - 待审批</p>
+                            {% else %}
+                            <p class="status-text pending">待处理</p>
+                            {% endif %}
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 相关文档 -->
+    <div class="card card-decorated">
+        <div class="card-header">
+            <h3 class="card-title">相关文档</h3>
+        </div>
+        <div class="card-body">
+            {% if documents and documents|length > 0 %}
+            <div class="documents-list">
+                {% for doc in documents %}
+                <div class="document-item">
+                    <div class="doc-icon">
+                        {% if '.pdf' in doc.filename|lower %}
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                        </svg>
+                        {% else %}
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
+                            <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        {% endif %}
+                    </div>
+                    <div class="doc-info">
+                        <span class="doc-name">{{ doc.original_filename or doc.filename }}</span>
+                        <span class="doc-meta">{{ doc.step_code }} | {{ doc.uploaded_at|cn_time }}</span>
+                    </div>
+                    <div class="doc-review-status">
+                        {% if doc.review_status == 'admin_approved' or doc.review_status == 'approved' %}
+                        <span class="badge badge-success">最终通过</span>
+                        {% elif doc.review_status == 'secretary_approved' %}
+                        <span class="badge badge-info">书记已审待上级</span>
+                        {% elif doc.review_status == 'secretary_rejected' or doc.review_status == 'rejected' %}
+                        <span class="badge badge-danger">书记已驳回</span>
+                        {% if doc.review_comment %}
+                        <span class="doc-review-comment">{{ doc.review_comment }}</span>
+                        {% endif %}
+                        {% elif doc.review_status == 'admin_rejected' %}
+                        <span class="badge badge-danger">管理员已驳回</span>
+                        {% if doc.review_comment %}
+                        <span class="doc-review-comment">{{ doc.review_comment }}</span>
+                        {% endif %}
+                        {% else %}
+                        <span class="badge badge-warning">待审核</span>
+                        {% endif %}
+                    </div>
+                    <div class="doc-review-actions">
+                        {# Admin can always review documents that are pending or secretary-approved #}
+                        {% if doc.review_status == 'pending' or not doc.review_status or doc.review_status == 'secretary_approved' %}
+                        <button class="btn btn-sm btn-success btn-admin-review-doc"
+                                data-doc-id="{{ doc.id }}"
+                                data-action="approve"
+                                title="审核通过">通过</button>
+                        <button class="btn btn-sm btn-danger btn-admin-review-doc"
+                                data-doc-id="{{ doc.id }}"
+                                data-action="reject"
+                                title="驳回文档">驳回</button>
+                        {% endif %}
+                        {# Admin can always delete any document #}
+                        <button class="btn btn-sm btn-admin-delete-doc"
+                                data-doc-id="{{ doc.id }}"
+                                style="background: #999; color: white; border: none; cursor: pointer; padding: 4px 10px; border-radius: 4px; font-size: 0.8125rem;"
+                                title="删除文档">删除</button>
+                        <a href="{{ url_for('admin.download_document', doc_id=doc.id) }}" class="btn btn-sm btn-secondary">下载</a>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <p>暂无相关文档</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 操作按钮 -->
+    {% if application.status == 'in_progress' %}
+    <div class="action-buttons">
+        <a href="{{ url_for('admin.approval_review', approval_id=application.id) }}" class="btn btn-primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            审批
+        </a>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+.approval-detail-page {
+    max-width: 1000px;
+    margin: 0 auto;
+}
+
+.page-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-lg);
+    margin-bottom: var(--spacing-xl);
+}
+
+.page-title {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    font-weight: 600;
+    color: var(--color-primary-dark);
+    margin: 0;
+}
+
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--spacing-lg);
+}
+
+.info-item {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.info-label {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+}
+
+.info-value {
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+/* 时间线 */
+.timeline {
+    position: relative;
+    padding-left: 40px;
+}
+
+.timeline::before {
+    content: '';
+    position: absolute;
+    left: 15px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--color-border-light);
+}
+
+.timeline-item {
+    position: relative;
+    padding-bottom: var(--spacing-lg);
+}
+
+.timeline-item:last-child {
+    padding-bottom: 0;
+}
+
+.timeline-marker {
+    position: absolute;
+    left: -40px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--color-bg-gray);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-muted);
+    z-index: 1;
+}
+
+.timeline-item.completed .timeline-marker {
+    background: var(--color-success);
+    color: white;
+}
+
+.timeline-item.failed .timeline-marker {
+    background: var(--color-error);
+    color: white;
+}
+
+.timeline-item.current .timeline-marker {
+    background: var(--color-primary);
+    color: white;
+}
+
+.step-number {
+    font-weight: 600;
+    font-size: 0.875rem;
+}
+
+.timeline-content {
+    background: var(--color-bg-light);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+}
+
+.timeline-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-xs);
+}
+
+.step-code {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-primary);
+}
+
+.step-name {
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+.stage-badge {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    background: var(--color-bg-gray);
+    border-radius: var(--radius-sm);
+    color: var(--color-text-secondary);
+}
+
+.status-text {
+    font-size: 0.875rem;
+    margin: 0;
+}
+
+.status-text.success {
+    color: var(--color-success);
+}
+
+.status-text.error {
+    color: var(--color-error);
+}
+
+.status-text.pending {
+    color: var(--color-text-muted);
+}
+
+.status-text.current {
+    color: var(--color-accent, #D4AF37);
+    font-weight: 600;
+}
+
+.time-text {
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+    margin: var(--spacing-xs) 0 0;
+}
+
+/* 文档列表 */
+.documents-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.document-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--color-bg-light);
+    border-radius: var(--radius-md);
+}
+
+.doc-icon {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-primary);
+}
+
+.doc-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.doc-name {
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+.doc-meta {
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+}
+
+/* 操作按钮 */
+.action-buttons {
+    display: flex;
+    gap: var(--spacing-md);
+    margin-top: var(--spacing-xl);
+}
+
+/* 徽章 */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.badge-warning {
+    background: rgba(218, 165, 32, 0.1);
+    color: var(--color-warning);
+}
+
+.badge-success {
+    background: rgba(46, 139, 87, 0.1);
+    color: var(--color-success);
+}
+
+.badge-danger {
+    background: rgba(220, 20, 60, 0.1);
+    color: var(--color-error);
+}
+
+.badge-secondary {
+    background: var(--color-bg-gray);
+    color: var(--color-text-muted);
+}
+
+/* 空状态 */
+.empty-state {
+    text-align: center;
+    padding: var(--spacing-xl);
+    color: var(--color-text-muted);
+}
+
+@media (max-width: 768px) {
+    .info-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .timeline {
+        padding-left: 30px;
+    }
+
+    .timeline-marker {
+        left: -30px;
+        width: 24px;
+        height: 24px;
+    }
+}
+
+/* 文档审核状态 */
+.doc-review-status {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+}
+
+.doc-review-comment {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary, #888);
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.doc-review-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+/* 按钮颜色变体 */
+.btn-success {
+    background: var(--color-success, #2E8B57);
+    color: white;
+    border: none;
+}
+
+.btn-success:hover {
+    background: #246b45;
+}
+
+.btn-danger {
+    background: var(--color-error, #DC143C);
+    color: white;
+    border: none;
+}
+
+.btn-danger:hover {
+    background: #b01030;
+}
+
+.badge-info {
+    background: rgba(21, 101, 192, 0.1);
+    color: #1565C0;
+}
+</style>
+
+<script>
+/**
+ * Admin document review - approve/reject documents
+ */
+document.querySelectorAll('.btn-admin-review-doc').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var docId = this.dataset.docId;
+        var action = this.dataset.action;
+        var actionLabel = action === 'approve' ? '通过' : '驳回';
+
+        var comment = '';
+        if (action === 'reject') {
+            comment = prompt('请输入驳回原因:');
+            if (comment === null) return; // user cancelled
+        } else {
+            if (!confirm('确认审核' + actionLabel + '该文档？')) return;
+        }
+
+        // Disable both review buttons for this document
+        var siblingBtns = this.parentElement.querySelectorAll('.btn-admin-review-doc');
+        siblingBtns.forEach(function(b) { b.disabled = true; });
+
+        fetch('/admin/api/documents/' + docId + '/review', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: action, comment: comment || '' })
+        })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            if (data.success) {
+                alert('文档已审核' + actionLabel);
+                window.location.reload();
+            } else {
+                alert('操作失败: ' + (data.message || '未知错误'));
+                siblingBtns.forEach(function(b) { b.disabled = false; });
+            }
+        })
+        .catch(function(error) {
+            alert('网络错误，请重试');
+            siblingBtns.forEach(function(b) { b.disabled = false; });
+        });
+    });
+});
+
+/**
+ * Admin document deletion - admin can delete any document
+ */
+document.querySelectorAll('.btn-admin-delete-doc').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var docId = this.dataset.docId;
+
+        if (!confirm('确定要删除这个文档吗？此操作不可撤销。')) {
+            return;
+        }
+
+        this.disabled = true;
+        this.textContent = '删除中...';
+
+        fetch('/admin/api/documents/' + docId, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' }
+        })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            if (data.success) {
+                alert('文档已删除');
+                window.location.reload();
+            } else {
+                alert('删除失败: ' + (data.message || '未知错误'));
+                btn.disabled = false;
+                btn.textContent = '删除';
+            }
+        })
+        .catch(function(error) {
+            alert('网络错误，请重试');
+            btn.disabled = false;
+            btn.textContent = '删除';
+        });
+    });
+});
+</script>
+{% endblock %}

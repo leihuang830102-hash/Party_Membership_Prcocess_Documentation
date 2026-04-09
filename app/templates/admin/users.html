@@ -1,0 +1,916 @@
+{% extends "base.html" %}
+{% block title %}用户管理 - 入党文档管理系统{% endblock %}
+
+{% block content %}
+<div class="users-page">
+    <div class="page-header">
+        <h1 class="page-title">用户管理</h1>
+        <p class="page-subtitle">管理系统用户账户、角色和权限</p>
+    </div>
+
+    <!-- 筛选区域 -->
+    <div class="card filter-card">
+        <div class="card-body">
+            <form class="filter-form" method="GET" action="{{ url_for('admin.users') }}">
+                <div class="filter-row">
+                    <!-- 搜索框 -->
+                    <div class="filter-group filter-search">
+                        <label class="filter-label">搜索用户</label>
+                        <input type="text" name="search" class="form-control" placeholder="输入用户名或姓名搜索..." value="{{ request.args.get('search', '') }}">
+                    </div>
+
+                    <!-- 角色筛选 -->
+                    <div class="filter-group">
+                        <label class="filter-label">用户角色</label>
+                        <select name="role" class="form-control filter-select">
+                            <option value="">全部角色</option>
+                            <option value="admin" {% if request.args.get('role') == 'admin' %}selected{% endif %}>管理员</option>
+                            <option value="secretary" {% if request.args.get('role') == 'secretary' %}selected{% endif %}>书记</option>
+                            <option value="contact_person" {% if request.args.get('role') == 'contact_person' %}selected{% endif %}>联系人</option>
+                            <option value="applicant" {% if request.args.get('role') == 'applicant' %}selected{% endif %}>申请人</option>
+                        </select>
+                    </div>
+
+                    <!-- 支部筛选 -->
+                    <div class="filter-group">
+                        <label class="filter-label">所属支部</label>
+                        <select name="branch" class="form-control filter-select">
+                            <option value="">全部支部</option>
+                            {% for branch in branches %}
+                            <option value="{{ branch.id }}" {% if request.args.get('branch') == branch.id|string %}selected{% endif %}>{{ branch.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- 操作按钮 -->
+                    <div class="filter-actions">
+                        <button type="submit" class="btn btn-primary">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <path d="m21 21-4.35-4.35"></path>
+                            </svg>
+                            筛选
+                        </button>
+                        <a href="{{ url_for('admin.users') }}" class="btn btn-secondary">重置</a>
+                        <button type="button" class="btn btn-accent" onclick="openAddUserModal()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                <path d="M12 4v16m8-8H4"></path>
+                            </svg>
+                            新增用户
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 用户列表 -->
+    <div class="card card-decorated">
+        <div class="card-header">
+            <h3 class="card-title">用户列表</h3>
+            <div class="list-summary">
+                共 <span class="highlight">{{ users|length if users else 0 }}</span> 位用户
+            </div>
+        </div>
+        <div class="card-body">
+            {% if users and users|length > 0 %}
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>用户</th>
+                            <th>用户名</th>
+                            <th>工号</th>
+                            <th>角色</th>
+                            <th>所属支部</th>
+                            <th>状态</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for user in users %}
+                        <tr>
+                            <!-- 用户头像和姓名 -->
+                            <td>
+                                <div class="user-cell">
+                                    <div class="user-avatar-small">{{ user.name[0] if user.name else user.username[0] }}</div>
+                                    <span class="user-name-text">{{ user.name or '-' }}</span>
+                                </div>
+                            </td>
+                            <!-- 用户名 -->
+                            <td>
+                                <span class="username-text">{{ user.username }}</span>
+                            </td>
+                            <!-- 工号 -->
+                            <td>
+                                <span class="employee-id">{{ user.employee_id or '-' }}</span>
+                            </td>
+                            <!-- 角色 -->
+                            <td>
+                                {% if user.role == 'admin' %}
+                                <span class="role-badge role-admin">管理员</span>
+                                {% elif user.role == 'secretary' %}
+                                <span class="role-badge role-secretary">书记</span>
+                                {% elif user.role == 'contact_person' %}
+                                <span class="role-badge role-contact-person">联系人</span>
+                                {% elif user.role == 'applicant' %}
+                                <span class="role-badge role-applicant">申请人</span>
+                                {% else %}
+                                <span class="role-badge role-other">{{ user.role }}</span>
+                                {% endif %}
+                            </td>
+                            <!-- 所属支部 -->
+                            <td>
+                                <span class="branch-text">{{ user.branch.name if user.branch else '-' }}</span>
+                            </td>
+                            <!-- 状态 -->
+                            <td>
+                                {% if user.is_active %}
+                                <span class="status-badge status-active">启用</span>
+                                {% else %}
+                                <span class="status-badge status-disabled">禁用</span>
+                                {% endif %}
+                            </td>
+                            <!-- 操作按钮 -->
+                            <td>
+                                <div class="btn-group">
+                                    <button type="button" class="btn btn-sm btn-secondary" onclick="openEditUserModal({{ user.id }})" title="编辑用户">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                            <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"></path>
+                                            <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                                        </svg>
+                                        编辑
+                                    </button>
+                                    {% if user.id != current_user.id %}
+                                    <button type="button" class="btn btn-sm {% if user.is_active %}btn-warning{% else %}btn-success{% endif %}"
+                                            onclick="toggleUserStatus({{ user.id }}, {{ 'true' if user.is_active else 'false' }})"
+                                            title="{% if user.is_active %}禁用用户{% else %}启用用户{% endif %}">
+                                        {% if user.is_active %}
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                            <circle cx="12" cy="12" r="10"></circle>
+                                            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+                                        </svg>
+                                        禁用
+                                        {% else %}
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                            <path d="M22 11.08V12a10 10 0 11-5.93-9.14"></path>
+                                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                                        </svg>
+                                        启用
+                                        {% endif %}
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline" onclick="resetPassword({{ user.id }})" title="重置密码">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                            <path d="M7 11V7a5 5 0 0110 0v4"></path>
+                                        </svg>
+                                        重置密码
+                                    </button>
+                                    {% else %}
+                                    <span class="current-user-hint">当前用户</span>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="empty-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                    </svg>
+                </div>
+                <h3 class="empty-title">暂无用户数据</h3>
+                <p class="empty-desc">系统中还没有用户，点击"新增用户"按钮添加第一位用户</p>
+                <button type="button" class="btn btn-primary mt-lg" onclick="openAddUserModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                        <path d="M12 4v16m8-8H4"></path>
+                    </svg>
+                    新增用户
+                </button>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- 用户模态框 -->
+<div id="userModal" class="modal" style="display: none;">
+    <div class="modal-overlay" onclick="closeUserModal()"></div>
+    <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">
+            <h3 class="modal-title" id="userModalTitle">新增用户</h3>
+            <button type="button" class="modal-close" onclick="closeUserModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+        <form id="userForm" onsubmit="submitUserForm(event)">
+            <div class="modal-body">
+                <input type="hidden" id="userId" name="id" value="">
+                <div class="form-group">
+                    <label for="userName" class="form-label">姓名 <span class="text-danger">*</span></label>
+                    <input type="text" id="userName" name="name" class="form-control" required placeholder="请输入姓名">
+                </div>
+                <div class="form-group">
+                    <label for="userUsername" class="form-label">用户名 <span class="text-danger">*</span></label>
+                    <input type="text" id="userUsername" name="username" class="form-control" required placeholder="请输入用户名">
+                </div>
+                <div class="form-group" id="passwordGroup">
+                    <label for="userPassword" class="form-label">密码 <span class="text-danger">*</span></label>
+                    <input type="password" id="userPassword" name="password" class="form-control" placeholder="请输入密码">
+                    <small class="form-hint" id="passwordHint">编辑时留空表示不修改密码</small>
+                </div>
+                <div class="form-group">
+                    <label for="userEmployeeId" class="form-label">工号</label>
+                    <input type="text" id="userEmployeeId" name="employee_id" class="form-control" placeholder="请输入工号">
+                </div>
+                <div class="form-group">
+                    <label for="userRole" class="form-label">角色 <span class="text-danger">*</span></label>
+                    <select id="userRole" name="role" class="form-control" required>
+                        <option value="">请选择角色</option>
+                        <option value="admin">管理员</option>
+                        <option value="secretary">书记</option>
+                        <option value="contact_person">联系人</option>
+                        <option value="applicant">申请人</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="userBranch" class="form-label">所属支部</label>
+                    <select id="userBranch" name="branch_id" class="form-control">
+                        <option value="">请选择支部</option>
+                        {% for branch in branches %}
+                        <option value="{{ branch.id }}">{{ branch.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeUserModal()">取消</button>
+                <button type="submit" class="btn btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 确认对话框 -->
+<div id="confirmModal" class="modal" style="display: none;">
+    <div class="modal-overlay" onclick="closeModal()"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 class="modal-title" id="modalTitle">确认操作</h3>
+            <button type="button" class="modal-close" onclick="closeModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+        <div class="modal-body">
+            <p id="modalMessage">确定要执行此操作吗？</p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">取消</button>
+            <button type="button" class="btn btn-primary" id="confirmBtn" onclick="confirmAction()">确定</button>
+        </div>
+    </div>
+</div>
+
+<style>
+/* 用户管理页面样式 */
+.users-page {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.page-header {
+    margin-bottom: var(--spacing-xl);
+}
+
+.page-title {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    font-weight: 600;
+    color: var(--color-primary-dark);
+    margin-bottom: var(--spacing-xs);
+}
+
+.page-subtitle {
+    color: var(--color-text-secondary);
+    font-size: 1rem;
+}
+
+/* 筛选卡片 */
+.filter-card {
+    margin-bottom: var(--spacing-lg);
+}
+
+.filter-card .card-body {
+    padding: var(--spacing-lg);
+}
+
+.filter-form {
+    width: 100%;
+}
+
+.filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-md);
+    align-items: flex-end;
+}
+
+.filter-group {
+    flex: 1;
+    min-width: 150px;
+}
+
+.filter-search {
+    flex: 1.5;
+    min-width: 200px;
+}
+
+.filter-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.filter-select {
+    min-width: 100%;
+}
+
+.filter-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: flex-end;
+    padding-top: 24px;
+}
+
+.filter-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+/* 列表摘要 */
+.list-summary {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+}
+
+.list-summary .highlight {
+    color: var(--color-primary);
+    font-weight: 600;
+}
+
+/* 表格响应式 */
+.table-responsive {
+    overflow-x: auto;
+}
+
+/* 表格样式 */
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 900px;
+}
+
+.table th,
+.table td {
+    padding: var(--spacing-md);
+    text-align: left;
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+.table th {
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+    background: var(--color-bg-gray);
+    white-space: nowrap;
+}
+
+.table tbody tr {
+    transition: background var(--transition-fast);
+}
+
+.table tbody tr:hover {
+    background: var(--color-bg-light);
+}
+
+.table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* 用户单元格 */
+.user-cell {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.user-avatar-small {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-text-light);
+    flex-shrink: 0;
+}
+
+.user-name-text {
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+.username-text {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+}
+
+.employee-id {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+}
+
+.branch-text {
+    font-size: 0.875rem;
+    color: var(--color-text-primary);
+}
+
+/* 角色徽章 */
+.role-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.role-admin {
+    background: rgba(196, 30, 58, 0.1);
+    color: var(--color-primary);
+}
+
+.role-secretary {
+    background: rgba(65, 105, 225, 0.1);
+    color: var(--color-info);
+}
+
+.role-applicant {
+    background: rgba(46, 139, 87, 0.1);
+    color: var(--color-success);
+}
+
+.role-contact-person {
+    background: rgba(255, 140, 0, 0.1);
+    color: #e67e00;
+}
+
+.role-other {
+    background: var(--color-bg-gray);
+    color: var(--color-text-muted);
+}
+
+/* 状态徽章 */
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.status-active {
+    background: rgba(46, 139, 87, 0.1);
+    color: var(--color-success);
+}
+
+.status-disabled {
+    background: rgba(220, 20, 60, 0.1);
+    color: var(--color-error);
+}
+
+/* 按钮组 */
+.btn-group {
+    display: flex;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
+.btn-group .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    white-space: nowrap;
+}
+
+/* 警告按钮 */
+.btn-warning {
+    background: rgba(218, 165, 32, 0.1);
+    color: var(--color-warning);
+    border: 1px solid var(--color-warning);
+}
+
+.btn-warning:hover {
+    background: var(--color-warning);
+    color: var(--color-text-light);
+}
+
+/* 成功按钮 */
+.btn-success {
+    background: rgba(46, 139, 87, 0.1);
+    color: var(--color-success);
+    border: 1px solid var(--color-success);
+}
+
+.btn-success:hover {
+    background: var(--color-success);
+    color: var(--color-text-light);
+}
+
+/* 当前用户提示 */
+.current-user-hint {
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+    font-style: italic;
+}
+
+/* 空状态 */
+.empty-state {
+    text-align: center;
+    padding: var(--spacing-xxl) var(--spacing-lg);
+}
+
+.empty-icon {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto var(--spacing-lg);
+    color: var(--color-text-muted);
+    opacity: 0.4;
+}
+
+.empty-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.empty-title {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: var(--spacing-sm);
+}
+
+.empty-desc {
+    font-size: 0.9375rem;
+    color: var(--color-text-muted);
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+/* 模态框样式 */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+    position: relative;
+    background: var(--color-bg-white);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    max-width: 500px;
+    width: 90%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    animation: modal-slide-in 0.3s ease;
+}
+
+@keyframes modal-slide-in {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.modal-header {
+    padding: var(--spacing-lg);
+    border-bottom: 1px solid var(--color-border-light);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+}
+
+.modal-title {
+    font-family: var(--font-display);
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--color-text-muted);
+    padding: var(--spacing-xs);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color var(--transition-fast);
+}
+
+.modal-close:hover {
+    color: var(--color-text-primary);
+}
+
+.modal-body {
+    padding: var(--spacing-lg);
+    overflow-y: auto;
+    flex: 1;
+}
+
+.modal-body p {
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+}
+
+.modal-footer {
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: var(--color-bg-gray);
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    display: flex;
+    gap: var(--spacing-sm);
+    flex-shrink: 0;
+    justify-content: flex-end;
+}
+
+/* Modal form takes full height */
+.modal-content form {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+
+/* 响应式设计 */
+@media (max-width: 992px) {
+    .filter-row {
+        flex-direction: column;
+    }
+
+    .filter-group {
+        width: 100%;
+        min-width: auto;
+    }
+
+    .filter-search {
+        min-width: auto;
+    }
+
+    .filter-actions {
+        width: 100%;
+        padding-top: var(--spacing-md);
+        flex-wrap: wrap;
+    }
+
+    .filter-actions .btn {
+        flex: 1;
+        justify-content: center;
+    }
+}
+
+@media (max-width: 768px) {
+    .page-title {
+        font-size: 1.5rem;
+    }
+
+    .table th,
+    .table td {
+        padding: var(--spacing-sm);
+    }
+
+    .btn-group {
+        flex-direction: column;
+    }
+
+    .btn-group .btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+</style>
+
+<script>
+// 当前操作的类型和用户ID
+let currentAction = null;
+let currentUserId = null;
+
+// 打开新增用户模态框
+function openAddUserModal() {
+    document.getElementById('userModalTitle').textContent = '新增用户';
+    document.getElementById('userForm').reset();
+    document.getElementById('userId').value = '';
+    document.getElementById('userPassword').required = true;
+    document.getElementById('passwordHint').style.display = 'none';
+    document.getElementById('userModal').style.display = 'flex';
+}
+
+// 打开编辑用户模态框
+function openEditUserModal(userId) {
+    document.getElementById('userModalTitle').textContent = '编辑用户';
+    document.getElementById('userId').value = userId;
+    document.getElementById('userPassword').required = false;
+    document.getElementById('passwordHint').style.display = 'block';
+
+    // 获取用户数据
+    fetch(`/admin/api/users/${userId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.user) {
+                const user = data.user;
+                document.getElementById('userName').value = user.name || '';
+                document.getElementById('userUsername').value = user.username || '';
+                document.getElementById('userEmployeeId').value = user.employee_id || '';
+                document.getElementById('userRole').value = user.role || '';
+                document.getElementById('userBranch').value = user.branch_id || '';
+                document.getElementById('userModal').style.display = 'flex';
+            } else {
+                alert('获取用户信息失败');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('获取用户信息失败，请稍后重试');
+        });
+}
+
+// 关闭用户模态框
+function closeUserModal() {
+    document.getElementById('userModal').style.display = 'none';
+}
+
+// 提交用户表单
+function submitUserForm(event) {
+    event.preventDefault();
+
+    const userId = document.getElementById('userId').value;
+    const formData = new FormData(document.getElementById('userForm'));
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+    const url = userId ? `/admin/api/users/${userId}` : '/admin/api/users';
+    const method = userId ? 'PUT' : 'POST';
+
+    fetch(url, {
+        method: method,
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify(Object.fromEntries(formData))
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            closeUserModal();
+            setTimeout(() => location.reload(), 300);
+        } else {
+            alert(data.message || '保存失败');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('保存失败，请稍后重试');
+    });
+}
+
+// 切换用户状态
+function toggleUserStatus(userId, isActive) {
+    currentAction = 'toggleStatus';
+    currentUserId = userId;
+
+    const title = isActive ? '禁用用户' : '启用用户';
+    const message = isActive
+        ? '确定要禁用该用户吗？禁用后用户将无法登录系统。'
+        : '确定要启用该用户吗？启用后用户将恢复正常使用。';
+
+    document.getElementById('modalTitle').textContent = title;
+    document.getElementById('modalMessage').textContent = message;
+    document.getElementById('confirmModal').style.display = 'flex';
+}
+
+// 重置密码
+function resetPassword(userId) {
+    currentAction = 'resetPassword';
+    currentUserId = userId;
+
+    document.getElementById('modalTitle').textContent = '重置密码';
+    document.getElementById('modalMessage').textContent = '确定要重置该用户的密码吗？密码将被重置为默认密码，用户需要在下次登录时修改密码。';
+    document.getElementById('confirmModal').style.display = 'flex';
+}
+
+// 关闭模态框
+function closeModal() {
+    document.getElementById('confirmModal').style.display = 'none';
+    currentAction = null;
+    currentUserId = null;
+}
+
+// 确认操作
+function confirmAction() {
+    if (!currentAction || !currentUserId) {
+        closeModal();
+        return;
+    }
+
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+    if (currentAction === 'toggleStatus') {
+        fetch(`/admin/api/users/${currentUserId}/toggle-status`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert(data.message || '操作失败');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('操作失败，请稍后重试');
+        });
+    } else if (currentAction === 'resetPassword') {
+        fetch(`/admin/api/users/${currentUserId}/reset-password`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('密码已重置为默认密码：' + (data.default_password || '123456'));
+                closeModal();
+            } else {
+                alert(data.message || '操作失败');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('操作失败，请稍后重试');
+        });
+    }
+
+    closeModal();
+}
+</script>
+{% endblock %}

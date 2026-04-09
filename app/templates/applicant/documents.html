@@ -1,0 +1,579 @@
+{% extends "base.html" %}
+
+{% block title %}我的文档 - 入党文档管理系统{% endblock %}
+
+{% block extra_css %}
+<style>
+/* ========================================
+   我的文档页面样式
+   ======================================== */
+
+.documents-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-xl);
+}
+
+.documents-title {
+    font-family: var(--font-display);
+    font-size: 1.75rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+/* 上传区域 */
+.upload-section {
+    margin-bottom: var(--spacing-xl);
+}
+
+.upload-card {
+    background: var(--color-bg-white);
+    border: 2px dashed var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-xxl);
+    text-align: center;
+    transition: all var(--transition-fast);
+}
+
+.upload-card:hover {
+    border-color: var(--color-primary);
+    background: var(--color-bg-light);
+}
+
+.upload-card.dragover {
+    border-color: var(--color-primary);
+    background: rgba(196, 30, 58, 0.05);
+}
+
+.upload-icon {
+    font-size: 3rem;
+    margin-bottom: var(--spacing-md);
+    color: var(--color-text-muted);
+}
+
+.upload-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: var(--spacing-sm);
+}
+
+.upload-desc {
+    color: var(--color-text-secondary);
+    margin-bottom: var(--spacing-lg);
+    font-size: 0.875rem;
+}
+
+.upload-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+    align-items: center;
+}
+
+.upload-form input[type="file"] {
+    display: none;
+}
+
+.upload-form select {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    min-width: 200px;
+}
+
+/* 文档列表 */
+.documents-section {
+    background: var(--color-bg-white);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border-light);
+    overflow: hidden;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-lg);
+    background: var(--color-bg-light);
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+.section-title {
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.documents-list {
+    min-height: 200px;
+}
+
+.document-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-bottom: 1px solid var(--color-border-light);
+    transition: background var(--transition-fast);
+}
+
+.document-item:last-child {
+    border-bottom: none;
+}
+
+.document-item:hover {
+    background: var(--color-bg-light);
+}
+
+.doc-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    background: var(--color-bg-light);
+}
+
+.doc-icon.pdf {
+    background: #FFEBEE;
+    color: #C62828;
+}
+
+.doc-icon.word {
+    background: #E3F2FD;
+    color: #1565C0;
+}
+
+.doc-icon.excel {
+    background: #E8F5E9;
+    color: #2E7D32;
+}
+
+.doc-icon.image {
+    background: #FFF3E0;
+    color: #EF6C00;
+}
+
+.doc-icon.default {
+    background: var(--color-bg-light);
+    color: var(--color-text-muted);
+}
+
+.doc-info {
+    flex: 1;
+}
+
+.doc-name {
+    font-weight: 500;
+    color: var(--color-text-primary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.doc-meta {
+    display: flex;
+    gap: var(--spacing-md);
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+.doc-meta span {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+.doc-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+/* 审核状态徽章 */
+.review-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.review-badge.pending {
+    background: #FFF8E1;
+    color: #F57F17;
+}
+
+.review-badge.approved {
+    background: #E8F5E9;
+    color: #2E7D32;
+}
+
+.review-badge.secretary-approved {
+    background: #E3F2FD;
+    color: #1565C0;
+}
+
+.review-badge.rejected {
+    background: #FFEBEE;
+    color: #C62828;
+}
+
+/* 驳回原因显示 */
+.review-comment-box {
+    margin-top: 6px;
+    padding: 8px 12px;
+    background: #FFF3E0;
+    border-left: 3px solid #EF6C00;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #E65100;
+}
+
+.review-comment-box .reviewer-info {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    margin-top: 4px;
+}
+
+/* 空状态 */
+.empty-state {
+    padding: var(--spacing-xxl);
+    text-align: center;
+    color: var(--color-text-muted);
+}
+
+.empty-icon {
+    font-size: 3rem;
+    margin-bottom: var(--spacing-md);
+    opacity: 0.5;
+}
+
+.empty-text {
+    font-size: 1rem;
+}
+
+/* 所需模板 */
+.required-templates {
+    margin-bottom: var(--spacing-xl);
+}
+
+.template-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: var(--color-bg-light);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-sm);
+}
+
+.template-info {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.template-icon {
+    font-size: 1.5rem;
+}
+
+.template-name {
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+/* 消息提示 */
+.alert {
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-lg);
+}
+
+.alert-success {
+    background: #E8F5E9;
+    color: #2E7D32;
+    border: 1px solid #A5D6A7;
+}
+
+.alert-error {
+    background: #FFEBEE;
+    color: #C62828;
+    border: 1px solid #EF9A9A;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+    .documents-header {
+        flex-direction: column;
+        gap: var(--spacing-md);
+        align-items: flex-start;
+    }
+
+    .doc-meta {
+        flex-direction: column;
+        gap: var(--spacing-xs);
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="documents-header">
+    <h1 class="documents-title">我的文档</h1>
+</div>
+
+<!-- 消息提示区域 -->
+<div id="message-area"></div>
+
+{% if not application %}
+<div class="card card-decorated mb-xl">
+    <div class="card-body" style="text-align: center; padding: var(--spacing-xxl);">
+        <p style="color: var(--color-text-muted); font-size: 1.125rem;">您尚未开始入党申请流程</p>
+        <p style="color: var(--color-text-secondary); margin-top: var(--spacing-md);">开始申请后即可上传相关文档</p>
+    </div>
+</div>
+{% else %}
+
+<!-- 可用模板 -->
+{% if available_templates and available_templates|length > 0 %}
+<div class="required-templates">
+    <div class="card card-decorated">
+        <div class="card-header">
+            <h2 class="card-title">可用模板下载</h2>
+        </div>
+        <div class="card-body">
+            {% for template in available_templates %}
+            <div class="template-item">
+                <div class="template-info">
+                    <span class="template-icon">&#128196;</span>
+                    <span class="template-name">{{ template.name }}{% if template.stage %}（第{{ template.stage }}阶段）{% else %}（通用）{% endif %}</span>
+                </div>
+                <a href="{{ url_for('applicant.download_template', id=template.id) }}" class="btn btn-sm btn-outline" download>
+                    下载模板
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- 上传区域 -->
+<div class="upload-section">
+    <div class="upload-card" id="upload-card">
+        <div class="upload-icon">&#128193;</div>
+        <div class="upload-title">上传文档</div>
+        <div class="upload-desc">支持 PDF、Word、Excel、图片格式，单文件最大 16MB</div>
+        <form class="upload-form" id="upload-form" enctype="multipart/form-data">
+            <select name="doc_type" id="doc-type">
+                <option value="general">一般文档</option>
+                <option value="application_letter">入党申请书</option>
+                <option value="thought_report">思想汇报</option>
+                <option value="autobiography">自传</option>
+                <option value="political_review">政治审查材料</option>
+                <option value="training_certificate">培训证明</option>
+                <option value="other">其他材料</option>
+            </select>
+            <input type="file" name="file" id="file-input" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png">
+            <label for="file-input" class="btn btn-primary">选择文件</label>
+            <button type="submit" class="btn btn-accent" id="upload-btn" style="display: none;">上传文件</button>
+        </form>
+    </div>
+</div>
+
+<!-- 文档列表 -->
+<div class="documents-section">
+    <div class="section-header">
+        <h2 class="section-title">已上传文档</h2>
+        <span class="doc-count">{{ documents|length }} 个文件</span>
+    </div>
+    <div class="documents-list">
+        {% if documents and documents|length > 0 %}
+        {% for doc in documents %}
+        <div class="document-item">
+            <div class="doc-icon">
+                {% if '.pdf' in doc.filename|lower %}&#128196;
+                {% elif '.doc' in doc.filename|lower %}&#128196;
+                {% elif '.xls' in doc.filename|lower or '.xlsx' in doc.filename|lower %}&#128202;
+                {% elif '.jpg' in doc.filename|lower or '.jpeg' in doc.filename|lower or '.png' in doc.filename|lower %}&#128247;
+                {% else %}&#128196;
+                {% endif %}
+            </div>
+            <div class="doc-info">
+                <div class="doc-name">
+                    {{ doc.filename }}
+                    {% if doc.review_status == 'admin_approved' or doc.review_status == 'approved' %}
+                    <span class="review-badge approved">&#10003; 最终通过</span>
+                    {% elif doc.review_status == 'secretary_approved' %}
+                    <span class="review-badge secretary-approved">&#10003; 书记已审</span>
+                    {% elif doc.review_status == 'secretary_rejected' or doc.review_status == 'rejected' %}
+                    <span class="review-badge rejected">&#10007; 已驳回</span>
+                    {% elif doc.review_status == 'admin_rejected' %}
+                    <span class="review-badge rejected">&#10007; 管理员已驳回</span>
+                    {% else %}
+                    <span class="review-badge pending">&#9203; 待审核</span>
+                    {% endif %}
+                </div>
+                <div class="doc-meta">
+                    <span>&#128194; {{ doc.file_size|default('未知') }}</span>
+                    <span>&#128197; {{ doc.uploaded_at }}</span>
+                    <span>&#128203; {{ doc.step_code }}</span>
+                </div>
+                {% if doc.review_status in ('secretary_rejected', 'admin_rejected', 'rejected') and doc.review_comment %}
+                <div class="review-comment-box">
+                    驳回原因：{{ doc.review_comment }}
+                    {% if doc.reviewer_name %}
+                    <div class="reviewer-info">审核人：{{ doc.reviewer_name }}{% if doc.reviewed_at %} | {{ doc.reviewed_at }}{% endif %}</div>
+                    {% endif %}
+                </div>
+                {% elif doc.review_status in ('secretary_approved', 'admin_approved', 'approved') and doc.reviewer_name %}
+                <div class="doc-meta" style="margin-top: 2px;">
+                    <span style="color: #2E7D32;">&#10003; 审核人：{{ doc.reviewer_name }}{% if doc.reviewed_at %} | {{ doc.reviewed_at }}{% endif %}</span>
+                </div>
+                {% endif %}
+            </div>
+            <div class="doc-actions">
+                <button class="btn btn-sm btn-outline" onclick="downloadDocument({{ doc.id }})">下载</button>
+                {% if doc.review_status in ('admin_approved', 'secretary_approved', 'approved') %}
+                {# Approved documents cannot be deleted by applicant #}
+                {% elif doc.review_status == 'admin_rejected' %}
+                {# Admin-rejected documents: applicant cannot delete, secretary handles it #}
+                <span class="review-badge rejected" style="font-size: 0.75rem;">请联系书记处理</span>
+                {% elif doc.review_status in ('secretary_rejected', 'rejected') %}
+                {# Secretary-rejected documents: applicant can delete and resubmit #}
+                <button class="btn btn-sm btn-outline" style="color: var(--color-error);" onclick="deleteDocument({{ doc.id }})" title="删除后可重新上传">删除</button>
+                {% else %}
+                {# Pending documents can be deleted #}
+                <button class="btn btn-sm btn-outline" style="color: var(--color-error);" onclick="deleteDocument({{ doc.id }})">删除</button>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">&#128450;</div>
+            <p class="empty-text">暂无已上传的文档</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// File input change handler
+const fileInput = document.getElementById('file-input');
+const uploadBtn = document.getElementById('upload-btn');
+const uploadForm = document.getElementById('upload-form');
+const uploadCard = document.getElementById('upload-card');
+const messageArea = document.getElementById('message-area');
+
+fileInput.addEventListener('change', function(e) {
+    if (e.target.files.length > 0) {
+        uploadBtn.style.display = 'inline-block';
+    } else {
+        uploadBtn.style.display = 'none';
+    }
+});
+
+// Drag and drop
+uploadCard.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    uploadCard.classList.add('dragover');
+});
+
+uploadCard.addEventListener('dragleave', function(e) {
+    e.preventDefault();
+    uploadCard.classList.remove('dragover');
+});
+
+uploadCard.addEventListener('drop', function(e) {
+    e.preventDefault();
+    uploadCard.classList.remove('dragover');
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        fileInput.files = files;
+        uploadBtn.style.display = 'inline-block';
+    }
+});
+
+// Form submission
+uploadForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    const formData = new FormData(uploadForm);
+
+    if (!fileInput.files.length) {
+        showMessage('请选择要上传的文件', 'error');
+        return;
+    }
+
+    uploadBtn.disabled = true;
+    uploadBtn.textContent = '上传中...';
+
+    fetch('/applicant/api/documents', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showMessage('文件上传成功', 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showMessage(data.error || '上传失败', 'error');
+        }
+    })
+    .catch(error => {
+        showMessage('上传失败：' + error.message, 'error');
+    })
+    .finally(() => {
+        uploadBtn.disabled = false;
+        uploadBtn.textContent = '上传文件';
+    });
+});
+
+// Show message
+function showMessage(message, type) {
+    const alertClass = type === 'success' ? 'alert-success' : 'alert-error';
+    messageArea.innerHTML = `<div class="alert ${alertClass}">${message}</div>`;
+
+    setTimeout(() => {
+        messageArea.innerHTML = '';
+    }, 5000);
+}
+
+// Download document
+function downloadDocument(docId) {
+    window.location.href = `/applicant/api/documents/${docId}/download`;
+}
+
+// Delete document
+function deleteDocument(docId) {
+    if (confirm('确定要删除这个文档吗？')) {
+        fetch(`/applicant/api/documents/${docId}`, {
+            method: 'DELETE'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showMessage('文档已删除', 'success');
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showMessage(data.error || '删除失败', 'error');
+            }
+        })
+        .catch(error => {
+            showMessage('删除失败：' + error.message, 'error');
+        });
+    }
+}
+</script>
+{% endblock %}

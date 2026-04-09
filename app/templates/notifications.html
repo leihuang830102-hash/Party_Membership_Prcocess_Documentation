@@ -1,0 +1,585 @@
+{% extends "base.html" %}
+
+{% block title %}通知中心 - 入党文档管理系统{% endblock %}
+
+{% block extra_css %}
+<style>
+/* 通知中心页面样式 */
+.notifications-page {
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+/* 页面标题区 */
+.page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-xl);
+    flex-wrap: wrap;
+    gap: var(--spacing-md);
+}
+
+.page-title {
+    font-family: var(--font-display);
+    font-size: 1.75rem;
+    font-weight: 600;
+    color: var(--color-primary-dark);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.page-title::before {
+    content: '';
+    width: 6px;
+    height: 28px;
+    background: linear-gradient(180deg, var(--color-primary), var(--color-accent));
+    border-radius: 3px;
+}
+
+/* 筛选区域 */
+.filter-section {
+    background: var(--color-bg-white);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--spacing-md);
+}
+
+.filter-tabs {
+    display: flex;
+    gap: var(--spacing-xs);
+    background: var(--color-bg-gray);
+    padding: var(--spacing-xs);
+    border-radius: var(--radius-md);
+}
+
+.filter-tab {
+    padding: var(--spacing-sm) var(--spacing-lg);
+    border-radius: var(--radius-sm);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    border: none;
+    background: transparent;
+}
+
+.filter-tab:hover {
+    color: var(--color-primary);
+}
+
+.filter-tab.active {
+    background: var(--color-bg-white);
+    color: var(--color-primary);
+    box-shadow: var(--shadow-sm);
+}
+
+.filter-tab .badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    margin-left: var(--spacing-xs);
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: var(--color-primary);
+    color: var(--color-text-light);
+    border-radius: 10px;
+}
+
+.filter-tab.active .badge {
+    background: var(--color-primary);
+}
+
+.mark-read-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.mark-read-btn:hover {
+    color: var(--color-primary);
+    border-color: var(--color-primary);
+    background: var(--color-bg-light);
+}
+
+.mark-read-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* 通知列表 */
+.notifications-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+/* 通知项卡片 */
+.notification-item {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-md);
+    padding: var(--spacing-lg);
+    background: var(--color-bg-white);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    transition: all var(--transition-normal);
+    position: relative;
+    overflow: hidden;
+    text-decoration: none;
+    color: inherit;
+}
+
+.notification-item:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+    background: var(--color-bg-light);
+}
+
+/* 未读标识 - 左侧红色竖线 */
+.notification-item.unread {
+    border-left: 4px solid var(--color-primary);
+}
+
+.notification-item.unread::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    background: linear-gradient(180deg, var(--color-primary), var(--color-primary-light));
+}
+
+/* 通知图标 */
+.notification-icon {
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+}
+
+.notification-icon.system {
+    background: linear-gradient(135deg, #4169E1 0%, #3151B5 100%);
+    color: var(--color-text-light);
+}
+
+.notification-icon.approval {
+    background: linear-gradient(135deg, var(--color-accent) 0%, #C9A227 100%);
+    color: var(--color-text-primary);
+}
+
+.notification-icon.reminder {
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    color: var(--color-text-light);
+}
+
+.notification-icon svg {
+    width: 24px;
+    height: 24px;
+}
+
+/* 通知内容 */
+.notification-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.notification-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-xs);
+}
+
+.notification-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    line-height: 1.4;
+}
+
+.notification-item.unread .notification-title {
+    color: var(--color-primary-dark);
+}
+
+.notification-time {
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+}
+
+.notification-summary {
+    font-size: 0.9375rem;
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* 未读红点 */
+.unread-dot {
+    width: 10px;
+    height: 10px;
+    min-width: 10px;
+    background: var(--color-primary);
+    border-radius: 50%;
+    margin-top: var(--spacing-sm);
+    box-shadow: 0 0 0 3px rgba(196, 30, 58, 0.2);
+    animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+    0%, 100% {
+        box-shadow: 0 0 0 3px rgba(196, 30, 58, 0.2);
+    }
+    50% {
+        box-shadow: 0 0 0 6px rgba(196, 30, 58, 0.1);
+    }
+}
+
+/* 空状态 */
+.empty-state {
+    text-align: center;
+    padding: var(--spacing-xxl);
+    background: var(--color-bg-white);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.empty-icon {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto var(--spacing-lg);
+    background: var(--color-bg-gray);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.5rem;
+    color: var(--color-text-muted);
+}
+
+.empty-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: var(--spacing-sm);
+}
+
+.empty-desc {
+    font-size: 0.9375rem;
+    color: var(--color-text-muted);
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+    .page-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .filter-section {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .filter-tabs {
+        justify-content: center;
+    }
+
+    .mark-read-btn {
+        align-self: flex-end;
+    }
+
+    .notification-item {
+        padding: var(--spacing-md);
+    }
+
+    .notification-icon {
+        width: 40px;
+        height: 40px;
+        min-width: 40px;
+        font-size: 1.25rem;
+    }
+
+    .notification-header {
+        flex-direction: column;
+        gap: var(--spacing-xs);
+    }
+
+    .notification-time {
+        align-self: flex-start;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="notifications-page">
+    <!-- 页面标题 -->
+    <div class="page-header">
+        <h1 class="page-title">通知中心</h1>
+    </div>
+
+    <!-- 筛选区域 -->
+    <div class="filter-section">
+        <div class="filter-tabs">
+            <button class="filter-tab active" data-filter="all">
+                全部
+                <span class="badge" id="badge-all">5</span>
+            </button>
+            <button class="filter-tab" data-filter="unread">
+                未读
+                <span class="badge" id="badge-unread">3</span>
+            </button>
+            <button class="filter-tab" data-filter="read">
+                已读
+            </button>
+        </div>
+        <button class="mark-read-btn" id="markAllRead">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 11 12 14 22 4"></polyline>
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+            </svg>
+            全部标为已读
+        </button>
+    </div>
+
+    <!-- 通知列表 -->
+    <div class="notifications-list" id="notificationsList">
+        <!-- 系统通知 - 未读 -->
+        <a href="#" class="notification-item unread" data-id="1" data-type="system" data-read="false">
+            <div class="notification-icon system">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                </svg>
+            </div>
+            <div class="notification-content">
+                <div class="notification-header">
+                    <h3 class="notification-title">系统维护通知</h3>
+                    <span class="notification-time">10分钟前</span>
+                </div>
+                <p class="notification-summary">系统将于今晚22:00-23:00进行例行维护升级，届时系统将暂停服务，请提前保存您的工作内容。</p>
+            </div>
+            <div class="unread-dot"></div>
+        </a>
+
+        <!-- 审批通知 - 未读 -->
+        <a href="#" class="notification-item unread" data-id="2" data-type="approval" data-read="false">
+            <div class="notification-icon approval">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+            </div>
+            <div class="notification-content">
+                <div class="notification-header">
+                    <h3 class="notification-title">入党申请书审核通过</h3>
+                    <span class="notification-time">2小时前</span>
+                </div>
+                <p class="notification-summary">您提交的入党申请书已通过支部书记审核，请及时查看审核意见并准备后续材料。</p>
+            </div>
+            <div class="unread-dot"></div>
+        </a>
+
+        <!-- 提醒通知 - 未读 -->
+        <a href="#" class="notification-item unread" data-id="3" data-type="reminder" data-read="false">
+            <div class="notification-icon reminder">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                </svg>
+            </div>
+            <div class="notification-content">
+                <div class="notification-header">
+                    <h3 class="notification-title">思想汇报提交提醒</h3>
+                    <span class="notification-time">昨天</span>
+                </div>
+                <p class="notification-summary">您本季度的思想汇报将于7天后到期，请及时撰写并提交，保持思想汇报的连续性。</p>
+            </div>
+            <div class="unread-dot"></div>
+        </a>
+
+        <!-- 审批通知 - 已读 -->
+        <a href="#" class="notification-item" data-id="4" data-type="approval" data-read="true">
+            <div class="notification-icon approval">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+            </div>
+            <div class="notification-content">
+                <div class="notification-header">
+                    <h3 class="notification-title">材料待审核通知</h3>
+                    <span class="notification-time">3天前</span>
+                </div>
+                <p class="notification-summary">张三同志提交的转正申请书正在等待您审核，请及时处理。</p>
+            </div>
+        </a>
+
+        <!-- 系统通知 - 已读 -->
+        <a href="#" class="notification-item" data-id="5" data-type="system" data-read="true">
+            <div class="notification-icon system">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                </svg>
+            </div>
+            <div class="notification-content">
+                <div class="notification-header">
+                    <h3 class="notification-title">密码修改成功</h3>
+                    <span class="notification-time">1周前</span>
+                </div>
+                <p class="notification-summary">您的账户密码已成功修改，如非本人操作请及时联系管理员。</p>
+            </div>
+        </a>
+    </div>
+
+    <!-- 空状态（默认隐藏） -->
+    <div class="empty-state" id="emptyState" style="display: none;">
+        <div class="empty-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+            </svg>
+        </div>
+        <h3 class="empty-title">暂无通知</h3>
+        <p class="empty-desc">您还没有收到任何通知</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const filterTabs = document.querySelectorAll('.filter-tab');
+    const notificationsList = document.getElementById('notificationsList');
+    const emptyState = document.getElementById('emptyState');
+    const markAllReadBtn = document.getElementById('markAllRead');
+
+    // 更新徽章数量
+    function updateBadges() {
+        const allItems = document.querySelectorAll('.notification-item');
+        const unreadItems = document.querySelectorAll('.notification-item.unread');
+
+        document.getElementById('badge-all').textContent = allItems.length;
+        document.getElementById('badge-unread').textContent = unreadItems.length;
+
+        // 如果没有未读通知，隐藏"全部标为已读"按钮
+        if (unreadItems.length === 0) {
+            markAllReadBtn.style.display = 'none';
+        } else {
+            markAllReadBtn.style.display = 'inline-flex';
+        }
+    }
+
+    // 筛选通知
+    function filterNotifications(filter) {
+        const items = document.querySelectorAll('.notification-item');
+        let visibleCount = 0;
+
+        items.forEach(item => {
+            const isRead = item.dataset.read === 'true';
+            let show = false;
+
+            if (filter === 'all') {
+                show = true;
+            } else if (filter === 'unread') {
+                show = !isRead;
+            } else if (filter === 'read') {
+                show = isRead;
+            }
+
+            item.style.display = show ? 'flex' : 'none';
+            if (show) visibleCount++;
+        });
+
+        // 显示/隐藏空状态
+        if (visibleCount === 0) {
+            notificationsList.style.display = 'none';
+            emptyState.style.display = 'block';
+        } else {
+            notificationsList.style.display = 'flex';
+            emptyState.style.display = 'none';
+        }
+    }
+
+    // 标签切换
+    filterTabs.forEach(tab => {
+        tab.addEventListener('click', function() {
+            filterTabs.forEach(t => t.classList.remove('active'));
+            this.classList.add('active');
+            filterNotifications(this.dataset.filter);
+        });
+    });
+
+    // 全部标为已读
+    markAllReadBtn.addEventListener('click', function() {
+        const unreadItems = document.querySelectorAll('.notification-item.unread');
+        unreadItems.forEach(item => {
+            item.classList.remove('unread');
+            item.dataset.read = 'true';
+            const dot = item.querySelector('.unread-dot');
+            if (dot) dot.remove();
+        });
+        updateBadges();
+
+        // 保持当前筛选状态
+        const activeFilter = document.querySelector('.filter-tab.active').dataset.filter;
+        filterNotifications(activeFilter);
+    });
+
+    // 点击通知项标为已读
+    notificationsList.addEventListener('click', function(e) {
+        const item = e.target.closest('.notification-item');
+        if (item && item.classList.contains('unread')) {
+            item.classList.remove('unread');
+            item.dataset.read = 'true';
+            const dot = item.querySelector('.unread-dot');
+            if (dot) dot.remove();
+            updateBadges();
+        }
+    });
+
+    // 初始化
+    updateBadges();
+});
+</script>
+{% endblock %}

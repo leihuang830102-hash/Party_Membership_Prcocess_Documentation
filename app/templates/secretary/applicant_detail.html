@@ -1,0 +1,813 @@
+{% extends "base.html" %}
+{% block title %}申请人详情 - 入党文档管理系统{% endblock %}
+
+{% block content %}
+<div class="applicant-detail-page">
+    <!-- 页面头部 -->
+    <div class="page-header">
+        <div class="header-left">
+            <a href="{{ url_for('secretary.applicants') }}" class="btn btn-secondary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                    <path d="M19 12H5m7-7l-7 7 7 7"></path>
+                </svg>
+                返回列表
+            </a>
+        </div>
+        <h1 class="page-title">申请人详情</h1>
+    </div>
+
+    <!-- 一、申请人基本信息 -->
+    <div class="card card-decorated mb-lg">
+        <div class="card-header">
+            <h3 class="card-title">基本信息</h3>
+        </div>
+        <div class="card-body">
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">姓名</span>
+                    <span class="info-value">{{ user.name or '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">用户名</span>
+                    <span class="info-value">{{ user.username or '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">工号</span>
+                    <span class="info-value">{{ user.employee_id or '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">所属支部</span>
+                    <span class="info-value">{{ application.branch.name if application.branch else '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">申请日期</span>
+                    <span class="info-value">{{ application.apply_date.strftime('%Y-%m-%d') if application.apply_date else '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">当前阶段</span>
+                    <span class="info-value">第{{ application.current_stage }}阶段</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">当前步骤</span>
+                    <span class="info-value">{{ application.current_step }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">状态</span>
+                    <span class="info-value">
+                        {% if application.status == 'in_progress' %}
+                        <span class="badge badge-warning">进行中</span>
+                        {% elif application.status == 'completed' %}
+                        <span class="badge badge-success">已完成</span>
+                        {% elif application.status == 'cancelled' %}
+                        <span class="badge badge-danger">已取消</span>
+                        {% else %}
+                        <span class="badge badge-secondary">{{ application.status }}</span>
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 二、入党联系人管理 -->
+    <div class="card card-decorated mb-lg">
+        <div class="card-header">
+            <h3 class="card-title">入党联系人</h3>
+        </div>
+        <div class="card-body">
+            <div class="contact-section">
+                <!-- 当前联系人显示 -->
+                <div class="current-contact">
+                    <span class="info-label">当前联系人：</span>
+                    {% if contact_person %}
+                    <span class="contact-name">{{ contact_person.name or contact_person.username }}</span>
+                    <span class="contact-meta">({{ contact_person.role }})</span>
+                    {% else %}
+                    <span class="contact-none">暂未指定</span>
+                    {% endif %}
+                </div>
+                <!-- 指定/更换联系人 -->
+                <div class="contact-form">
+                    <select id="contactSelect" class="form-control contact-select">
+                        <option value="">-- 选择入党联系人 --</option>
+                        {% for candidate in candidate_contacts %}
+                        <option value="{{ candidate.id }}"
+                            {% if contact_person and contact_person.id == candidate.id %}selected{% endif %}>
+                            {{ candidate.name or candidate.username }} ({{ candidate.employee_id or candidate.role }})
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <button type="button" class="btn btn-sm btn-primary" id="btnSetContact"
+                            data-app-id="{{ application.id }}">
+                        {% if contact_person %}更换联系人{% else %}指定联系人{% endif %}
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 三、发展进度时间线（26步5阶段） -->
+    <div class="card card-decorated mb-lg">
+        <div class="card-header">
+            <h3 class="card-title">发展进度</h3>
+        </div>
+        <div class="card-body">
+            <!-- 阶段分组折叠导航 -->
+            <div class="stage-tabs">
+                {% set ns = namespace(stage_steps=[]) %}
+                {% for step in timeline %}
+                    {% if loop.first or step.stage != timeline[loop.index0 - 1].stage %}
+                        {% if not loop.first %}
+                        </div></div>
+                        {% endif %}
+                        <div class="stage-group" data-stage="{{ step.stage }}">
+                        <div class="stage-header" onclick="toggleStage(this)">
+                            <span class="stage-label">第{{ step.stage }}阶段</span>
+                            <svg class="stage-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </div>
+                        <div class="stage-body">
+                    {% endif %}
+                    <!-- 单个步骤条目 -->
+                    {% set is_current_step = (step.step_code == application.current_step) %}
+                    {% set is_failed_current = (step.status == 'failed' and is_current_step and application.status == 'in_progress') %}
+                    <div class="timeline-item {% if step.status == 'completed' %}completed{% elif is_failed_current %}failed{% elif step.status == 'failed' %}failed{% elif is_current_step and application.status == 'in_progress' %}current{% endif %}">
+                        <div class="timeline-marker">
+                            {% if step.status == 'completed' %}
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
+                            {% elif step.status == 'failed' %}
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                            {% else %}
+                            <span class="step-number">{{ loop.index }}</span>
+                            {% endif %}
+                        </div>
+                        <div class="timeline-content">
+                            <div class="timeline-header">
+                                <span class="step-code">{{ step.step_code }}</span>
+                                <span class="step-name">{{ step.name }}</span>
+                            </div>
+                            {% if step.description %}
+                            <div class="step-description">{{ step.description }}</div>
+                            {% endif %}
+                            <div class="timeline-body">
+                                {% if step.status == 'completed' %}
+                                <p class="status-text success">已完成 - {{ step.result or '审批通过' }}</p>
+                                <p class="time-text">{{ step.completed_at|cn_time if step.completed_at else '' }}</p>
+                                {% elif step.status == 'failed' %}
+                                <p class="status-text error">已驳回 - {{ step.result or '' }}</p>
+                                {% if is_failed_current %}
+                                <p class="status-text current" style="margin-top: 4px;">当前步骤 - 等待重新审核</p>
+                                <div class="step-actions">
+                                    <button class="btn btn-sm btn-success btn-approve-step"
+                                            data-app-id="{{ application.id }}"
+                                            data-step-code="{{ step.step_code }}"
+                                            data-action="approve">重新通过</button>
+                                    <button class="btn btn-sm btn-danger btn-approve-step"
+                                            data-app-id="{{ application.id }}"
+                                            data-step-code="{{ step.step_code }}"
+                                            data-action="reject">再次驳回</button>
+                                </div>
+                                {% endif %}
+                                {% else %}
+                                {% if is_current_step and application.status == 'in_progress' %}
+                                <p class="status-text current">当前步骤 - 待审批</p>
+                                <!-- 当前步骤的审批按钮 -->
+                                <div class="step-actions">
+                                    <button class="btn btn-sm btn-success btn-approve-step"
+                                            data-app-id="{{ application.id }}"
+                                            data-step-code="{{ step.step_code }}"
+                                            data-action="approve">通过</button>
+                                    <button class="btn btn-sm btn-danger btn-approve-step"
+                                            data-app-id="{{ application.id }}"
+                                            data-step-code="{{ step.step_code }}"
+                                            data-action="reject">驳回</button>
+                                </div>
+                                {% else %}
+                                <p class="status-text pending">待处理</p>
+                                {% endif %}
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% if loop.last %}
+                    </div></div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 四、相关文档列表 -->
+    <div class="card card-decorated mb-lg">
+        <div class="card-header">
+            <h3 class="card-title">相关文档</h3>
+        </div>
+        <div class="card-body">
+            {% if documents and documents|length > 0 %}
+            <div class="documents-list">
+                {% for doc in documents %}
+                <div class="document-item">
+                    <div class="doc-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
+                            <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                    </div>
+                    <div class="doc-info">
+                        <span class="doc-name">{{ doc.original_filename or doc.filename }}</span>
+                        <span class="doc-meta">{{ doc.step_code }} | {{ doc.uploaded_at|cn_time }}</span>
+                    </div>
+                    <!-- 文档审核状态徽章 -->
+                    <div class="doc-review-status">
+                        {% if doc.review_status == 'admin_approved' %}
+                        <span class="badge badge-success">最终通过</span>
+                        {% elif doc.review_status == 'secretary_approved' %}
+                        <span class="badge badge-info">书记已审待上级</span>
+                        {% elif doc.review_status == 'secretary_rejected' %}
+                        <span class="badge badge-danger">书记已驳回</span>
+                        {% if doc.review_comment %}
+                        <span class="doc-review-comment">{{ doc.review_comment }}</span>
+                        {% endif %}
+                        {% elif doc.review_status == 'admin_rejected' %}
+                        <span class="badge badge-danger">管理员已驳回</span>
+                        {% if doc.review_comment %}
+                        <span class="doc-review-comment">{{ doc.review_comment }}</span>
+                        {% endif %}
+                        {% else %}
+                        <span class="badge badge-warning">待审核</span>
+                        {% endif %}
+                    </div>
+                    <!-- 文档操作按钮 -->
+                    <div class="doc-review-actions">
+                        {% if doc.review_status == 'pending' or not doc.review_status %}
+                        <button class="btn btn-sm btn-success btn-review-doc"
+                                data-doc-id="{{ doc.id }}"
+                                data-action="approve">通过</button>
+                        <button class="btn btn-sm btn-danger btn-review-doc"
+                                data-doc-id="{{ doc.id }}"
+                                data-action="reject">驳回</button>
+                        {% endif %}
+                        {% if doc.review_status == 'admin_rejected' %}
+                        <button class="btn btn-sm btn-success btn-review-doc"
+                                data-doc-id="{{ doc.id }}"
+                                data-action="approve">重新通过</button>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <p>暂无相关文档</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<style>
+/* ========== 申请人详情页样式 ========== */
+.applicant-detail-page {
+    max-width: 1000px;
+    margin: 0 auto;
+}
+
+.page-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-lg);
+    margin-bottom: var(--spacing-xl);
+}
+
+.page-title {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    font-weight: 600;
+    color: var(--color-primary-dark);
+    margin: 0;
+}
+
+/* 信息网格 */
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--spacing-lg);
+}
+
+.info-item {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.info-label {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+}
+
+.info-value {
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+/* ========== 联系人管理 ========== */
+.contact-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.current-contact {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-size: 0.9375rem;
+}
+
+.contact-name {
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.contact-meta {
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+}
+
+.contact-none {
+    color: var(--color-text-muted);
+    font-style: italic;
+}
+
+.contact-form {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: center;
+}
+
+.contact-select {
+    max-width: 320px;
+}
+
+/* ========== 阶段分组时间线 ========== */
+.stage-tabs {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.stage-group {
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.stage-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: var(--color-bg-light);
+    cursor: pointer;
+    user-select: none;
+    transition: background var(--transition-fast);
+}
+
+.stage-header:hover {
+    background: var(--color-bg-gray);
+}
+
+.stage-label {
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--color-primary-dark);
+}
+
+.stage-chevron {
+    transition: transform var(--transition-fast);
+}
+
+.stage-group.collapsed .stage-chevron {
+    transform: rotate(-90deg);
+}
+
+.stage-body {
+    padding: var(--spacing-lg) var(--spacing-lg) var(--spacing-md);
+}
+
+.stage-group.collapsed .stage-body {
+    display: none;
+}
+
+/* ========== 时间线 ========== */
+.timeline {
+    position: relative;
+    padding-left: 40px;
+}
+
+.timeline::before {
+    content: '';
+    position: absolute;
+    left: 15px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--color-border-light);
+}
+
+.timeline-item {
+    position: relative;
+    padding-bottom: var(--spacing-lg);
+}
+
+.timeline-item:last-child {
+    padding-bottom: 0;
+}
+
+.timeline-marker {
+    position: absolute;
+    left: -40px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--color-bg-gray);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-muted);
+    z-index: 1;
+}
+
+.timeline-item.completed .timeline-marker {
+    background: var(--color-success);
+    color: white;
+}
+
+.timeline-item.failed .timeline-marker {
+    background: var(--color-error);
+    color: white;
+}
+
+.timeline-item.current .timeline-marker {
+    background: var(--color-primary);
+    color: white;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(196, 30, 58, 0.3); }
+    50% { box-shadow: 0 0 0 8px rgba(196, 30, 58, 0); }
+}
+
+.step-number {
+    font-weight: 600;
+    font-size: 0.875rem;
+}
+
+.timeline-content {
+    background: var(--color-bg-light);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+}
+
+.timeline-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-xs);
+}
+
+.step-code {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-primary);
+}
+
+.step-name {
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+.step-description {
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.status-text {
+    font-size: 0.875rem;
+    margin: 0;
+}
+
+.status-text.success { color: var(--color-success); }
+.status-text.error { color: var(--color-error); }
+.status-text.pending { color: var(--color-text-muted); }
+.status-text.current {
+    color: var(--color-accent, #D4AF37);
+    font-weight: 600;
+}
+
+.time-text {
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+    margin: var(--spacing-xs) 0 0;
+}
+
+/* 当前步骤操作按钮 */
+.step-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-sm);
+}
+
+/* ========== 文档列表 ========== */
+.documents-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.document-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--color-bg-light);
+    border-radius: var(--radius-md);
+}
+
+.doc-icon {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-primary);
+    flex-shrink: 0;
+}
+
+.doc-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.doc-name {
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+.doc-meta {
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+}
+
+.doc-review-status {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+}
+
+.doc-review-comment {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary, #888);
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.doc-review-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+/* ========== 徽章 ========== */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.badge-warning {
+    background: rgba(218, 165, 32, 0.1);
+    color: var(--color-warning);
+}
+
+.badge-success {
+    background: rgba(46, 139, 87, 0.1);
+    color: var(--color-success);
+}
+
+.badge-danger {
+    background: rgba(220, 20, 60, 0.1);
+    color: var(--color-error);
+}
+
+.badge-secondary {
+    background: var(--color-bg-gray);
+    color: var(--color-text-muted);
+}
+
+.badge-info {
+    background: rgba(21, 101, 192, 0.1);
+    color: #1565C0;
+}
+
+/* 按钮颜色变体 */
+.btn-success {
+    background: var(--color-success, #2E8B57);
+    color: white;
+    border: none;
+}
+.btn-success:hover { background: #246b45; }
+
+.btn-danger {
+    background: var(--color-error, #DC143C);
+    color: white;
+    border: none;
+}
+.btn-danger:hover { background: #b01030; }
+
+/* ========== 空状态 ========== */
+.empty-state {
+    text-align: center;
+    padding: var(--spacing-xl);
+    color: var(--color-text-muted);
+}
+
+/* ========== 响应式 ========== */
+@media (max-width: 768px) {
+    .info-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .timeline-marker {
+        left: -30px;
+        width: 24px;
+        height: 24px;
+    }
+
+    .document-item {
+        flex-wrap: wrap;
+    }
+
+    .doc-review-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+}
+</style>
+
+<script>
+/**
+ * 阶段分组折叠/展开
+ */
+function toggleStage(headerEl) {
+    var group = headerEl.parentElement;
+    group.classList.toggle('collapsed');
+}
+
+/**
+ * 步骤审批（通过/驳回） - 调用 secretary API
+ */
+document.querySelectorAll('.btn-approve-step').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var appId = this.dataset.appId;
+        var stepCode = this.dataset.stepCode;
+        var action = this.dataset.action;
+
+        if (action === 'reject') {
+            var reason = prompt('请输入驳回原因:');
+            if (reason === null) return; // 用户取消
+        } else {
+            if (!confirm('确认通过步骤 ' + stepCode + ' ?')) return;
+        }
+
+        // 禁用同一步骤的按钮防止重复点击
+        var siblingBtns = this.parentElement.querySelectorAll('.btn-approve-step');
+        siblingBtns.forEach(function(b) { b.disabled = true; });
+
+        fetch('/secretary/api/applicants/' + appId + '/approve-step', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                step_code: stepCode,
+                action: action,
+                result: action === 'reject' ? '驳回: ' + (reason || '') : '审批通过'
+            })
+        })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            if (data.success) {
+                alert('步骤已审批');
+                window.location.reload();
+            } else {
+                alert('操作失败: ' + (data.message || '未知错误'));
+                siblingBtns.forEach(function(b) { b.disabled = false; });
+            }
+        })
+        .catch(function(error) {
+            alert('网络错误，请重试');
+            siblingBtns.forEach(function(b) { b.disabled = false; });
+        });
+    });
+});
+
+/**
+ * 文档审核（通过/驳回） - 调用 secretary 文档审核 API
+ */
+document.querySelectorAll('.btn-review-doc').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var docId = this.dataset.docId;
+        var action = this.dataset.action;
+        var actionLabel = action === 'approve' ? '通过' : '驳回';
+
+        var comment = '';
+        if (action === 'reject') {
+            comment = prompt('请输入驳回原因:');
+            if (comment === null) return;
+        } else {
+            if (!confirm('确认审核' + actionLabel + '该文档？')) return;
+        }
+
+        var siblingBtns = this.parentElement.querySelectorAll('.btn-review-doc');
+        siblingBtns.forEach(function(b) { b.disabled = true; });
+
+        fetch('/secretary/api/documents/' + docId + '/review', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: action, comment: comment || '' })
+        })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            if (data.success) {
+                alert('文档已审核' + actionLabel);
+                window.location.reload();
+            } else {
+                alert('操作失败: ' + (data.message || '未知错误'));
+                siblingBtns.forEach(function(b) { b.disabled = false; });
+            }
+        })
+        .catch(function(error) {
+            alert('网络错误，请重试');
+            siblingBtns.forEach(function(b) { b.disabled = false; });
+        });
+    });
+});
+
+/**
+ * 指定/更换入党联系人 - 调用 secretary API
+ */
+document.getElementById('btnSetContact').addEventListener('click', function() {
+    var appId = this.dataset.appId;
+    var select = document.getElementById('contactSelect');
+    var contactPersonId = select.value;
+
+    if (!contactPersonId) {
+        alert('请先选择一位联系人');
+        return;
+    }
+
+    this.disabled = true;
+    this.textContent = '设置中...';
+
+    fetch('/secretary/api/applicants/' + appId + '/set-contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contact_person_id: parseInt(contactPersonId) })
+    })
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+        if (data.success) {
+            alert(data.message || '联系人已设置');
+            window.location.reload();
+        } else {
+            alert('操作失败: ' + (data.message || '未知错误'));
+            var btn = document.getElementById('btnSetContact');
+            btn.disabled = false;
+            btn.textContent = '指定联系人';
+        }
+    })
+    .catch(function(error) {
+        alert('网络错误，请重试');
+        var btn = document.getElementById('btnSetContact');
+        btn.disabled = false;
+        btn.textContent = '指定联系人';
+    });
+});
+</script>
+{% endblock %}

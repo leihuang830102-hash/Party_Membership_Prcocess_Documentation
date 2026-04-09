@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+{% block title %}申请人管理 - 入党文档管理系统{% endblock %}
+
+{% block content %}
+<div class="applicants-page">
+    <div class="page-header">
+        <h1 class="page-title">申请人管理</h1>
+        <p class="page-subtitle">管理本支部入党申请人</p>
+    </div>
+
+    <!-- 筛选区域 -->
+    <div class="card filter-card">
+        <div class="card-body">
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label class="filter-label">搜索</label>
+                    <input type="text" id="searchInput" class="form-control" placeholder="输入姓名或工号搜索...">
+                </div>
+                <div class="filter-group">
+                    <label class="filter-label">当前阶段</label>
+                    <select id="stageFilter" class="form-control">
+                        <option value="">全部阶段</option>
+                        <option value="1">第一阶段</option>
+                        <option value="2">第二阶段</option>
+                        <option value="3">第三阶段</option>
+                        <option value="4">第四阶段</option>
+                        <option value="5">第五阶段</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label class="filter-label">状态</label>
+                    <select id="statusFilter" class="form-control">
+                        <option value="">全部状态</option>
+                        <option value="in_progress">进行中</option>
+                        <option value="completed">已完成</option>
+                    </select>
+                </div>
+                <!-- 操作按钮 -->
+                <div class="filter-actions">
+                    <button type="button" class="btn btn-primary" onclick="loadApplicants()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <path d="m21 21-4.35-4.35"></path>
+                        </svg>
+                        搜索
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="resetFilters()">
+                        重置
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 申请人列表 -->
+    <div class="card card-decorated">
+        <div class="card-header">
+            <h3 class="card-title">申请人列表</h3>
+            <span class="card-count">共 <span id="totalCount">0</span> 人</span>
+        </div>
+        <div class="card-body">
+            <div id="applicantsList" class="applicants-list">
+                <!-- 申请人列表将通过JavaScript动态加载 -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+/* 申请人管理页面样式 */
+.applicants-page {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.page-header {
+    margin-bottom: var(--spacing-xl);
+}
+
+.page-title {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    font-weight: 600;
+    color: var(--color-primary-dark);
+    margin-bottom: var(--spacing-xs);
+}
+
+.page-subtitle {
+    color: var(--color-text-secondary);
+    font-size: 1rem;
+}
+
+/* 筛选卡片 */
+.filter-card {
+    margin-bottom: var(--spacing-lg);
+}
+
+.filter-card .card-body {
+    padding: var(--spacing-lg);
+}
+
+.filter-row {
+    display: flex;
+    gap: var(--spacing-lg);
+    flex-wrap: wrap;
+}
+
+.filter-group {
+    flex: 1;
+    min-width: 180px;
+}
+
+.filter-label {
+    display: block;
+    margin-bottom: var(--spacing-sm);
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+}
+
+.filter-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: flex-end;
+    padding-top: 24px;
+}
+
+.filter-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+/* 卡片头部 */
+.card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.card-count {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+}
+
+/* 申请人列表 */
+.applicants-list {
+    min-height: 200px;
+}
+
+.applicant-card {
+    display: flex;
+    align-items: center;
+    padding: var(--spacing-md);
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-md);
+    transition: all var(--transition-fast);
+}
+
+.applicant-card:hover {
+    border-color: var(--color-primary-light);
+    box-shadow: var(--shadow-sm);
+}
+
+.applicant-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-light);
+    font-weight: 600;
+    font-size: 1.125rem;
+    margin-right: var(--spacing-md);
+    flex-shrink: 0;
+}
+
+.applicant-info {
+    flex: 1;
+}
+
+.applicant-name {
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.applicant-meta {
+    display: flex;
+    gap: var(--spacing-md);
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+}
+
+.applicant-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+/* 空状态 */
+.empty-state {
+    text-align: center;
+    padding: var(--spacing-xxl);
+    color: var(--color-text-muted);
+}
+
+.empty-icon {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto var(--spacing-md);
+    opacity: 0.5;
+}
+
+.empty-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .filter-row {
+        flex-direction: column;
+    }
+
+    .filter-group {
+        width: 100%;
+    }
+
+    .applicant-card {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .applicant-actions {
+        width: 100%;
+        margin-top: var(--spacing-sm);
+    }
+}
+</style>
+
+<script>
+// 加载申请人列表
+async function loadApplicants() {
+    const search = document.getElementById('searchInput').value;
+    const stage = document.getElementById('stageFilter').value;
+    const status = document.getElementById('statusFilter').value;
+
+    try {
+        const response = await fetch(`/secretary/api/applicants?search=${encodeURIComponent(search)}&stage=${stage}&status=${status}`);
+        const data = await response.json();
+
+        const list = document.getElementById('applicantsList');
+        const countEl = document.getElementById('totalCount');
+
+        if (data.applicants && data.applicants.length > 0) {
+            countEl.textContent = data.applicants.length;
+            list.innerHTML = data.applicants.map(app => `
+                <div class="applicant-card">
+                    <div class="applicant-avatar">${app.name ? app.name[0] : '?'}</div>
+                    <div class="applicant-info">
+                        <div class="applicant-name">${app.name || app.username}</div>
+                        <div class="applicant-meta">
+                                <span>${app.employee_id || '无工号'}</span>
+                                <span>第${app.current_stage || 1}阶段</span>
+                                <span class="status-badge status-${app.status}">${app.status === 'in_progress' ? '进行中' : '已完成'}</span>
+                            </div>
+                    </div>
+                    <div class="applicant-actions">
+                        <a href="/secretary/applicant/${app.id}" class="btn btn-sm btn-secondary">查看详情</a>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            countEl.textContent = '0';
+            list.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                        </svg>
+                    </div>
+                    <p>暂无申请人数据</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('加载申请人列表失败:', error);
+    }
+}
+
+// 初始化加载
+document.addEventListener('DOMContentLoaded', loadApplicants);
+
+// 绑定筛选事件
+document.getElementById('searchInput').addEventListener('input', debounce(loadApplicants, 300));
+document.getElementById('stageFilter').addEventListener('change', loadApplicants);
+document.getElementById('statusFilter').addEventListener('change', loadApplicants);
+
+// 防抖函数
+function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(this, args), wait);
+    };
+}
+
+// 重置筛选条件
+function resetFilters() {
+    document.getElementById('searchInput').value = '';
+    document.getElementById('stageFilter').value = '';
+    document.getElementById('statusFilter').value = '';
+    loadApplicants();
+}
+</script>
+{% endblock %}

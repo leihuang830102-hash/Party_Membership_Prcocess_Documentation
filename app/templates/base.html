@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="入党文档管理系统 - 管理党员发展全流程">
+    <title>{% block title %}入党文档管理系统{% endblock %}</title>
+
+    <!-- CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <!-- 头部导航 -->
+    <header class="header">
+        <div class="header-inner">
+            <div class="header-brand">
+                <div class="party-icon">☭</div>
+                <h1 class="header-title">入党文档管理系统</h1>
+            </div>
+
+            <!-- 导航菜单 -->
+            <nav class="header-nav">
+                {% if current_user.is_authenticated %}
+                    {% if current_user.role == 'admin' %}
+                        <a href="{{ url_for('admin.dashboard') }}" class="nav-item {% if request.endpoint and request.endpoint.startswith('admin') %}active{% endif %}">管理首页</a>
+                        <a href="{{ url_for('admin.users') }}" class="nav-item {% if request.endpoint == 'admin.users' %}active{% endif %}">用户管理</a>
+                        <a href="{{ url_for('admin.branches') }}" class="nav-item {% if request.endpoint == 'admin.branches' %}active{% endif %}">支部管理</a>
+                        <a href="{{ url_for('admin.templates') }}" class="nav-item {% if request.endpoint == 'admin.templates' %}active{% endif %}">模板管理</a>
+                    {% elif current_user.role == 'secretary' %}
+                        <a href="{{ url_for('secretary.dashboard') }}" class="nav-item {% if request.endpoint and request.endpoint.startswith('secretary') %}active{% endif %}">工作台</a>
+                        <a href="{{ url_for('secretary.applicants') }}" class="nav-item">申请人管理</a>
+                        <a href="{{ url_for('secretary.documents') }}" class="nav-item">文档审核</a>
+                    {% else %}
+                        <a href="{{ url_for('applicant.dashboard') }}" class="nav-item {% if request.endpoint and request.endpoint.startswith('applicant') %}active{% endif %}">我的首页</a>
+                        <a href="{{ url_for('applicant.progress') }}" class="nav-item">发展进度</a>
+                        <a href="{{ url_for('applicant.documents') }}" class="nav-item">我的文档</a>
+                    {% endif %}
+                {% else %}
+                    <a href="{{ url_for('index') }}" class="nav-item {% if request.endpoint == 'index' %}active{% endif %}">首页</a>
+                    <a href="{{ url_for('auth.login') }}" class="nav-item">登录</a>
+                {% endif %}
+            </nav>
+
+            <!-- 用户信息 -->
+            <div class="header-user">
+                {% if current_user.is_authenticated %}
+                    <div class="user-info">
+                        <div class="user-avatar">{{ current_user.name[0] if current_user.name else current_user.username[0] }}</div>
+                        <span class="user-name">{{ current_user.name or current_user.username }}</span>
+                    </div>
+                    <a href="{{ url_for('auth.logout') }}" class="btn btn-sm btn-outline" style="color: white; border-color: rgba(255,255,255,0.5);">退出</a>
+                {% else %}
+                    <a href="{{ url_for('auth.login') }}" class="btn btn-sm btn-accent">登录</a>
+                {% endif %}
+            </div>
+        </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main class="main-content {% block content_class %}{% endblock %}">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- 页脚 -->
+    <footer class="footer">
+        <div class="footer-content">
+            <span>入党文档管理系统</span>
+            <span class="footer-divider"></span>
+            <span>版权所有</span>
+        </div>
+    </footer>
+
+    <!-- 额外脚本 -->
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,691 @@
+{% extends "base.html" %}
+{% block title %}支部管理 - 入党文档管理系统{% endblock %}
+
+{% block content %}
+<div class="branches-page">
+    <div class="page-header">
+        <h1 class="page-title">支部管理</h1>
+        <p class="page-subtitle">管理党组织架构中的各支部信息</p>
+    </div>
+
+    <!-- 筛选操作区域 -->
+    <div class="card card-decorated filter-card">
+        <div class="card-body">
+            <form class="filter-form" method="GET" action="{{ url_for('admin.branches') }}">
+                <div class="filter-row">
+                    <div class="filter-group">
+                        <label class="filter-label">支部名称</label>
+                        <input type="text" class="form-control" name="search" placeholder="请输入支部名称搜索..." value="{{ request.args.get('search', '') }}">
+                    </div>
+                    <div class="filter-actions">
+                        <button type="submit" class="btn btn-primary">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <path d="M21 21l-4.35-4.35"></path>
+                            </svg>
+                            搜索
+                        </button>
+                        <a href="{{ url_for('admin.branches') }}" class="btn btn-secondary">重置</a>
+                    </div>
+                </div>
+            </form>
+            <div class="filter-footer">
+                <a href="#" class="btn btn-accent" onclick="openAddModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                        <path d="M12 5v14m-7-7h14"></path>
+                    </svg>
+                    新增支部
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- 支部列表 -->
+    <div class="card card-decorated">
+        <div class="card-header">
+            <h3 class="card-title">支部列表</h3>
+            <span class="card-count">共 {{ branches|length if branches else 0 }} 个支部</span>
+        </div>
+        <div class="card-body">
+            {% if branches and branches|length > 0 %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>支部名称</th>
+                        <th>描述</th>
+                        <th>申请人数</th>
+                        <th>状态</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for branch in branches %}
+                    <tr>
+                        <td>
+                            <div class="branch-name">
+                                <div class="branch-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                                    </svg>
+                                </div>
+                                <span>{{ branch.name }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="branch-desc">{{ branch.description or '-' }}</span>
+                        </td>
+                        <td>
+                            <span class="member-count">{{ branch.applicant_count if branch.applicant_count is defined else 0 }}</span>
+                        </td>
+                        <td>
+                            {% if branch.is_active %}
+                            <span class="status-badge status-active">启用</span>
+                            {% else %}
+                            <span class="status-badge status-disabled">禁用</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="create-time">{{ branch.created_at|cn_time('%Y-%m-%d') }}</span>
+                        </td>
+                        <td>
+                            <div class="btn-group">
+                                <button class="btn btn-sm btn-secondary" onclick="openEditModal({{ branch.id }})">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                        <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"></path>
+                                        <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                                    </svg>
+                                    编辑
+                                </button>
+                                {% if branch.is_active %}
+                                <button class="btn btn-sm btn-warning" onclick="toggleStatus({{ branch.id }}, false)">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                        <circle cx="12" cy="12" r="10"></circle>
+                                        <path d="M4.93 4.93l14.14 14.14"></path>
+                                    </svg>
+                                    禁用
+                                </button>
+                                {% else %}
+                                <button class="btn btn-sm btn-success" onclick="toggleStatus({{ branch.id }}, true)">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                        <path d="M22 11.08V12a10 10 0 11-5.93-9.14"></path>
+                                        <path d="M22 4L12 14.01l-3-3"></path>
+                                    </svg>
+                                    启用
+                                </button>
+                                {% endif %}
+                                <button class="btn btn-sm btn-danger" onclick="deleteBranch({{ branch.id }})">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                        <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path>
+                                    </svg>
+                                    删除
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                <div class="empty-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                    </svg>
+                </div>
+                <p>暂无支部数据</p>
+                <p class="empty-hint">点击"新增支部"按钮添加第一个支部</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- 新增/编辑支部模态框 -->
+<div class="modal" id="branchModal">
+    <div class="modal-overlay" onclick="closeModal()"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 class="modal-title" id="modalTitle">新增支部</h3>
+            <button class="modal-close" onclick="closeModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                    <path d="M18 6L6 18M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+        <form id="branchForm" onsubmit="submitForm(event)">
+            <div class="modal-body">
+                <input type="hidden" name="branch_id" id="branchId">
+                <div class="form-group">
+                    <label class="form-label form-label-required">支部名称</label>
+                    <input type="text" class="form-control" name="name" id="branchName" required placeholder="请输入支部名称">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">描述</label>
+                    <textarea class="form-control" name="description" id="branchDescription" rows="3" placeholder="请输入支部描述（选填）"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">取消</button>
+                <button type="submit" class="btn btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 确认删除模态框 -->
+<div class="modal" id="deleteModal">
+    <div class="modal-overlay" onclick="closeDeleteModal()"></div>
+    <div class="modal-content modal-sm">
+        <div class="modal-header">
+            <h3 class="modal-title">确认删除</h3>
+            <button class="modal-close" onclick="closeDeleteModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                    <path d="M18 6L6 18M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+        <div class="modal-body">
+            <p class="delete-confirm-text">确定要删除该支部吗？此操作不可恢复。</p>
+            <input type="hidden" id="deleteBranchId">
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeDeleteModal()">取消</button>
+            <button type="button" class="btn btn-danger" onclick="confirmDelete()">确认删除</button>
+        </div>
+    </div>
+</div>
+
+<style>
+/* 支部管理页面样式 */
+.branches-page {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.page-header {
+    margin-bottom: var(--spacing-xl);
+}
+
+.page-title {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    font-weight: 600;
+    color: var(--color-primary-dark);
+    margin-bottom: var(--spacing-xs);
+}
+
+.page-subtitle {
+    color: var(--color-text-secondary);
+    font-size: 1rem;
+}
+
+/* 筛选卡片 */
+.filter-card {
+    margin-bottom: var(--spacing-lg);
+}
+
+.filter-form {
+    margin-bottom: var(--spacing-md);
+}
+
+.filter-row {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--spacing-lg);
+    flex-wrap: wrap;
+}
+
+.filter-group {
+    flex: 1;
+    min-width: 200px;
+}
+
+.filter-label {
+    display: block;
+    margin-bottom: var(--spacing-sm);
+    font-weight: 500;
+    color: var(--color-text-primary);
+    font-size: 0.875rem;
+}
+
+.filter-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+.filter-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: var(--spacing-md);
+    border-top: 1px solid var(--color-border-light);
+}
+
+/* 卡片头部 */
+.card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.card-count {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+}
+
+/* 表格样式 */
+.table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.table th,
+.table td {
+    padding: var(--spacing-md);
+    text-align: left;
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+.table th {
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+}
+
+.table tbody tr:hover {
+    background: var(--color-bg-light);
+}
+
+.table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* 支部名称单元格 */
+.branch-name {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.branch-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-light);
+    flex-shrink: 0;
+}
+
+.branch-icon svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* 支部描述 */
+.branch-desc {
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+}
+
+/* 成员数量 */
+.member-count {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: rgba(196, 30, 58, 0.1);
+    color: var(--color-primary);
+    border-radius: var(--radius-sm);
+    font-weight: 500;
+    font-size: 0.875rem;
+}
+
+/* 创建时间 */
+.create-time {
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+}
+
+/* 状态徽章 */
+.status-badge {
+    display: inline-block;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.status-active {
+    background: rgba(46, 139, 87, 0.1);
+    color: var(--color-success);
+}
+
+.status-disabled {
+    background: rgba(153, 153, 153, 0.1);
+    color: var(--color-text-muted);
+}
+
+/* 按钮组 */
+.btn-group {
+    display: flex;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+}
+
+/* 按钮变体 */
+.btn-warning {
+    background: linear-gradient(135deg, var(--color-warning) 0%, #B8860B 100%);
+    color: var(--color-text-light);
+}
+
+.btn-warning:hover {
+    box-shadow: 0 4px 12px rgba(218, 165, 32, 0.4);
+}
+
+.btn-success {
+    background: linear-gradient(135deg, var(--color-success) 0%, #1E6B3D 100%);
+    color: var(--color-text-light);
+}
+
+.btn-success:hover {
+    box-shadow: 0 4px 12px rgba(46, 139, 87, 0.4);
+}
+
+.btn-danger {
+    background: linear-gradient(135deg, var(--color-error) 0%, #8B0000 100%);
+    color: var(--color-text-light);
+}
+
+.btn-danger:hover {
+    box-shadow: 0 4px 12px rgba(220, 20, 60, 0.4);
+}
+
+/* 空状态 */
+.empty-state {
+    text-align: center;
+    padding: var(--spacing-xxl);
+    color: var(--color-text-muted);
+}
+
+.empty-icon {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto var(--spacing-md);
+    opacity: 0.5;
+}
+
+.empty-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.empty-hint {
+    font-size: 0.875rem;
+    margin-top: var(--spacing-sm);
+}
+
+/* 模态框 */
+.modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal.active {
+    display: flex;
+}
+
+.modal-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+}
+
+.modal-content {
+    position: relative;
+    background: var(--color-bg-white);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    width: 100%;
+    max-width: 500px;
+    margin: var(--spacing-md);
+    animation: modal-slide-in 0.3s ease;
+}
+
+.modal-sm {
+    max-width: 400px;
+}
+
+@keyframes modal-slide-in {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-lg);
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+.modal-title {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--color-text-muted);
+    padding: var(--spacing-xs);
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-fast);
+}
+
+.modal-close:hover {
+    background: var(--color-bg-gray);
+    color: var(--color-text-primary);
+}
+
+.modal-body {
+    padding: var(--spacing-lg);
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: var(--color-bg-gray);
+    border-top: 1px solid var(--color-border-light);
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+/* 删除确认文本 */
+.delete-confirm-text {
+    color: var(--color-text-primary);
+    line-height: 1.6;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .filter-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .filter-group {
+        min-width: 100%;
+    }
+
+    .filter-actions {
+        width: 100%;
+    }
+
+    .filter-actions .btn {
+        flex: 1;
+    }
+
+    .table {
+        display: block;
+        overflow-x: auto;
+    }
+
+    .btn-group {
+        flex-direction: column;
+    }
+
+    .btn-group .btn {
+        width: 100%;
+    }
+}
+</style>
+
+<script>
+// 打开新增模态框
+function openAddModal() {
+    document.getElementById('modalTitle').textContent = '新增支部';
+    document.getElementById('branchId').value = '';
+    document.getElementById('branchName').value = '';
+    document.getElementById('branchDescription').value = '';
+    document.getElementById('branchModal').classList.add('active');
+}
+
+// 打开编辑模态框
+function openEditModal(branchId) {
+    document.getElementById('modalTitle').textContent = '编辑支部';
+    // 从当前列表中获取支部信息
+    const row = document.querySelector(`button[onclick="openEditModal(${branchId})"]`).closest('tr');
+    const name = row.querySelector('.branch-name span').textContent;
+    const desc = row.querySelector('.branch-desc').textContent;
+
+    document.getElementById('branchId').value = branchId;
+    document.getElementById('branchName').value = name;
+    document.getElementById('branchDescription').value = desc === '-' ? '' : desc;
+    document.getElementById('branchModal').classList.add('active');
+}
+
+// 关闭模态框
+function closeModal() {
+    document.getElementById('branchModal').classList.remove('active');
+}
+
+// 提交表单
+function submitForm(event) {
+    event.preventDefault();
+
+    const branchId = document.getElementById('branchId').value;
+    const name = document.getElementById('branchName').value;
+    const description = document.getElementById('branchDescription').value;
+
+    const url = branchId ? `/admin/api/branches/${branchId}` : '/admin/api/branches';
+    const method = branchId ? 'PUT' : 'POST';
+
+    fetch(url, {
+        method: method,
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name, description })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.message) {
+            closeModal();
+            location.reload();
+        } else {
+            alert('保存失败：' + (data.error || '未知错误'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('保存失败，请重试');
+    });
+}
+
+// 切换状态
+function toggleStatus(branchId, isActive) {
+    fetch(`/admin/api/branches/${branchId}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ is_active: isActive })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.message) {
+            location.reload();
+        } else {
+            alert('操作失败：' + (data.error || '未知错误'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('操作失败，请重试');
+    });
+}
+
+// 删除支部
+function deleteBranch(branchId) {
+    document.getElementById('deleteBranchId').value = branchId;
+    document.getElementById('deleteModal').classList.add('active');
+}
+
+// 关闭删除模态框
+function closeDeleteModal() {
+    document.getElementById('deleteModal').classList.remove('active');
+}
+
+// 确认删除
+function confirmDelete() {
+    const branchId = document.getElementById('deleteBranchId').value;
+
+    fetch(`/admin/api/branches/${branchId}`, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.message) {
+            closeDeleteModal();
+            location.reload();
+        } else {
+            alert('删除失败：' + (data.error || '未知错误'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('删除失败，请重试');
+    });
+}
+
+// ESC键关闭模态框
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        closeModal();
+        closeDeleteModal();
+    }
+});
+</script>
+{% endblock %}

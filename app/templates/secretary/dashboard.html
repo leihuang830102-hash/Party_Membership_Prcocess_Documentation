@@ -1,0 +1,510 @@
+{% extends "base.html" %}
+{% block title %}工作台 - 入党文档管理系统{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <div class="page-header">
+        <h1 class="page-title">工作台</h1>
+        <p class="page-subtitle">欢迎回来，{{ current_user.name or current_user.username }}</p>
+    </div>
+
+    <!-- 统计卡片 -->
+    <div class="stats-grid">
+        <div class="stat-card stat-card-pending">
+            <div class="stat-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <div class="stat-number">{{ stats.pending if stats else 0 }}</div>
+                <div class="stat-label">待处理申请</div>
+            </div>
+        </div>
+
+        <div class="stat-card stat-card-active">
+            <div class="stat-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <div class="stat-number">{{ stats.in_progress if stats else 0 }}</div>
+                <div class="stat-label">本支部进行中申请</div>
+            </div>
+        </div>
+
+        <div class="stat-card stat-card-new">
+            <div class="stat-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <div class="stat-number">{{ stats.monthly_new if stats else 0 }}</div>
+                <div class="stat-label">本月新增申请</div>
+            </div>
+        </div>
+
+        <div class="stat-card stat-card-docs">
+            <div class="stat-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <div class="stat-number">{{ stats.pending_docs if stats else 0 }}</div>
+                <div class="stat-label">待审核文档</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 待处理列表 -->
+    <div class="card card-decorated">
+        <div class="card-header">
+            <h3 class="card-title">待处理列表</h3>
+            <a href="{{ url_for('secretary.applicants') }}" class="btn btn-sm btn-outline">查看全部</a>
+        </div>
+        <div class="card-body">
+            {% if pending_list and pending_list|length > 0 %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>申请人姓名</th>
+                        <th>当前阶段/步骤</th>
+                        <th>提交时间</th>
+                        <th>待办类型</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in pending_list %}
+                    <tr>
+                        <td>
+                            <div class="user-cell">
+                                <div class="user-avatar-small">{{ item.applicant.name[0] if item.applicant.name else item.applicant.username[0] }}</div>
+                                <span>{{ item.applicant.name or item.applicant.username }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            {% if item.todo_type == 'document_review' %}
+                            <span class="doc-name-text" title="{{ item.doc_name }}">{{ item.doc_name }}</span>
+                            <br>
+                            <span class="stage-badge">{{ item.stage or '待定' }}</span>
+                            {% if item.step %}
+                            <span class="step-text">/ {{ item.step }}</span>
+                            {% endif %}
+                            {% else %}
+                            <span class="stage-badge">{{ item.stage or '待定' }}</span>
+                            {% if item.step %}
+                            <span class="step-text">/ {{ item.step }}</span>
+                            {% endif %}
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="time-text">{{ item.submit_time|cn_time }}</span>
+                        </td>
+                        <td>
+                            <span class="todo-badge todo-{{ item.todo_type }}">{{ item.todo_label }}</span>
+                        </td>
+                        <td>
+                            <div class="btn-group">
+                                {% if item.todo_type == 'document_review' %}
+                                <a href="{{ url_for('secretary.documents') }}" class="btn btn-sm btn-secondary">查看</a>
+                                {% else %}
+                                <a href="{{ url_for('secretary.applicant_detail', id=item.applicant.application_id) }}" class="btn btn-sm btn-secondary">查看</a>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                <div class="empty-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
+                    </svg>
+                </div>
+                <p>暂无待处理事项</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 快捷入口 -->
+    <div class="quick-actions">
+        <h2 class="section-title">快捷入口</h2>
+        <div class="actions-grid">
+            <a href="{{ url_for('secretary.applicants') }}" class="action-card">
+                <div class="action-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                    </svg>
+                </div>
+                <div class="action-content">
+                    <h3>申请人管理</h3>
+                    <p>查看和管理本支部申请人</p>
+                </div>
+            </a>
+
+            <a href="{{ url_for('secretary.documents') }}" class="action-card">
+                <div class="action-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                </div>
+                <div class="action-content">
+                    <h3>文档审核</h3>
+                    <p>审核申请人提交的材料</p>
+                </div>
+            </a>
+        </div>
+    </div>
+</div>
+
+<style>
+/* 仪表盘页面样式 */
+.dashboard {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.page-header {
+    margin-bottom: var(--spacing-xl);
+}
+
+.page-title {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    font-weight: 600;
+    color: var(--color-primary-dark);
+    margin-bottom: var(--spacing-xs);
+}
+
+.page-subtitle {
+    color: var(--color-text-secondary);
+    font-size: 1rem;
+}
+
+/* 统计卡片网格 */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--spacing-lg);
+    margin-bottom: var(--spacing-xl);
+}
+
+@media (max-width: 1024px) {
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 576px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 统计卡片 */
+.stat-card {
+    background: var(--color-bg-white);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    box-shadow: var(--shadow-sm);
+    transition: all var(--transition-normal);
+    border-top: 3px solid transparent;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.stat-card-pending {
+    border-top-color: var(--color-warning);
+}
+
+.stat-card-active {
+    border-top-color: var(--color-info);
+}
+
+.stat-card-new {
+    border-top-color: var(--color-success);
+}
+
+.stat-card-docs {
+    border-top-color: #8B5CF6;
+}
+
+.stat-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.stat-icon svg {
+    width: 24px;
+    height: 24px;
+}
+
+.stat-card-pending .stat-icon {
+    background: rgba(218, 165, 32, 0.1);
+    color: var(--color-warning);
+}
+
+.stat-card-active .stat-icon {
+    background: rgba(65, 105, 225, 0.1);
+    color: var(--color-info);
+}
+
+.stat-card-new .stat-icon {
+    background: rgba(46, 139, 87, 0.1);
+    color: var(--color-success);
+}
+
+.stat-card-docs .stat-icon {
+    background: rgba(139, 92, 246, 0.1);
+    color: #8B5CF6;
+}
+
+.stat-content {
+    flex: 1;
+}
+
+.stat-number {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    line-height: 1.2;
+}
+
+.stat-label {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+    margin-top: var(--spacing-xs);
+}
+
+/* 表格样式 */
+.table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.table th,
+.table td {
+    padding: var(--spacing-md);
+    text-align: left;
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+.table th {
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.table tbody tr:hover {
+    background: var(--color-bg-light);
+}
+
+.table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* 用户单元格 */
+.user-cell {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.user-avatar-small {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-text-light);
+    flex-shrink: 0;
+}
+
+/* 阶段徽章 */
+.stage-badge {
+    display: inline-block;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: var(--color-bg-gray);
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+}
+
+.step-text {
+    color: var(--color-text-muted);
+    font-size: 0.8125rem;
+}
+
+/* 时间文本 */
+.time-text {
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+}
+
+/* 待办类型徽章 */
+.todo-badge {
+    display: inline-block;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.todo-review {
+    background: rgba(196, 30, 58, 0.1);
+    color: var(--color-primary);
+}
+
+.todo-supplement {
+    background: rgba(218, 165, 32, 0.1);
+    color: var(--color-warning);
+}
+
+.todo-document_review {
+    background: rgba(139, 92, 246, 0.1);
+    color: #8B5CF6;
+}
+
+/* Document name in pending list */
+.doc-name-text {
+    display: inline-block;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.875rem;
+    color: var(--color-text-primary);
+    font-weight: 500;
+}
+
+/* 空状态 */
+.empty-state {
+    text-align: center;
+    padding: var(--spacing-xxl);
+    color: var(--color-text-muted);
+}
+
+.empty-icon {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto var(--spacing-md);
+    opacity: 0.5;
+}
+
+.empty-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+/* 快捷入口区域 */
+.quick-actions {
+    margin-top: var(--spacing-xl);
+}
+
+.section-title {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: var(--spacing-lg);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.section-title::before {
+    content: '';
+    width: 4px;
+    height: 20px;
+    background: linear-gradient(180deg, var(--color-primary), var(--color-accent));
+    border-radius: 2px;
+}
+
+.actions-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--spacing-lg);
+}
+
+@media (max-width: 768px) {
+    .actions-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 快捷入口卡片 */
+.action-card {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-lg);
+    background: var(--color-bg-white);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    transition: all var(--transition-normal);
+    text-decoration: none;
+    border: 2px solid transparent;
+}
+
+.action-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--color-primary-light);
+}
+
+.action-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-md);
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-light);
+    flex-shrink: 0;
+}
+
+.action-icon svg {
+    width: 24px;
+    height: 24px;
+}
+
+.action-content h3 {
+    font-family: var(--font-display);
+    font-size: 1.0625rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.action-content p {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+}
+</style>
+{% endblock %}
