@@ -2,6 +2,7 @@
 """
 Integration tests for admin functionality
 """
+import json
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -127,3 +128,85 @@ class TestApprovalManagement:
         page.goto(f"{BASE_URL}/admin/approvals")
         page.wait_for_load_state("networkidle")
         expect(page.locator('h1, h2, .card-title').first).to_be_visible()
+
+
+class TestCreateUserAPI:
+    """Test admin create_user API returns correct response (Bug 1 fix).
+
+    Bug 1: create_user API now returns {'success': True, 'user': {...}} on success.
+    This ensures the frontend can reliably check response.success.
+    """
+
+    def test_create_user_returns_success_true(self, logged_in_admin):
+        """POST /admin/api/users with valid data returns success: true."""
+        page = logged_in_admin
+
+        # Create a unique username to avoid collision
+        import time
+        unique_name = f"e2e_bug1_{int(time.time())}"
+
+        response = page.request.post(
+            f"{BASE_URL}/admin/api/users",
+            data=json.dumps({
+                "username": unique_name,
+                "password": "123456",
+                "name": "Bug1测试用户",
+                "role": "applicant",
+            }),
+            headers={"Content-Type": "application/json"},
+        )
+        body = response.json()
+
+        if response.status == 201:
+            # New user created -- verify success: true and user data
+            assert body.get("success") is True, \
+                f"Expected success=True, got {body}"
+            assert "user" in body, \
+                f"Expected 'user' key in response, got {body}"
+            user_data = body["user"]
+            assert user_data.get("username") == unique_name
+            assert user_data.get("name") == "Bug1测试用户"
+            assert user_data.get("role") == "applicant"
+        elif response.status == 400:
+            # User already exists -- verify error response (not a crash)
+            assert body.get("error") is not None, \
+                f"Expected 'error' key for duplicate user, got {body}"
+        else:
+            pytest.fail(f"Unexpected status {response.status}: {body}")
+
+    def test_create_user_duplicate_returns_error(self, logged_in_admin):
+        """POST /admin/api/users with duplicate username returns 400."""
+        page = logged_in_admin
+
+        # Try creating 'admin' which always exists
+        response = page.request.post(
+            f"{BASE_URL}/admin/api/users",
+            data=json.dumps({
+                "username": "admin",
+                "password": "123456",
+                "name": "重复管理员",
+                "role": "admin",
+            }),
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status == 400, \
+            f"Expected 400 for duplicate username, got {response.status}"
+        body = response.json()
+        assert body.get("error") is not None, \
+            f"Expected 'error' key in response, got {body}"
+
+    def test_create_user_missing_fields_returns_error(self, logged_in_admin):
+        """POST /admin/api/users with missing required fields returns 400."""
+        page = logged_in_admin
+
+        response = page.request.post(
+            f"{BASE_URL}/admin/api/users",
+            data=json.dumps({
+                "username": "",
+                "password": "",
+                "name": "",
+            }),
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status == 400, \
+            f"Expected 400 for missing fields, got {response.status}"

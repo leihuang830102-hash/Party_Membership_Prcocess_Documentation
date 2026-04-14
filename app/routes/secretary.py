@@ -269,6 +269,7 @@ def applicant_detail(id):
             'stage': step_def.stage,
             'name': step_def.name,
             'description': step_def.description,
+            'approval_type': getattr(step_def, 'approval_type', 'two_level'),
             'status': record.status if record else 'not_started',
             'completed_at': record.completed_at if record else None,
             'result': record.result if record else None
@@ -283,9 +284,13 @@ def applicant_detail(id):
     contact_person = application.contact_person
 
     # Get candidate contact persons: contact_person, secretary, and admin users in the same branch
+    # Also include admin users regardless of branch (admin has branch_id=None, would be excluded otherwise)
     # These are users who can serve as 入党联系人 (party membership contacts)
     candidate_contacts = User.query.filter(
-        User.branch_id == application.branch_id,
+        db.or_(
+            User.branch_id == application.branch_id,
+            User.role == 'admin'  # admins can be contacts for any branch
+        ),
         User.role.in_(['contact_person', 'secretary', 'admin']),
         User.is_active == True
     ).all()
@@ -664,11 +669,13 @@ def api_submit_step(id):
             'message': '不支持的文件类型，请上传 PDF、Word、Excel 或图片文件'
         }), 400
 
-    # Secure filename and create upload path (same directory structure as applicant)
+    # Build safe filename preserving original extension (even for Chinese filenames)
+    # secure_filename() strips Chinese characters, losing the file extension entirely
+    # e.g. "入党申请书.pdf" -> "pdf" (no dot, no extension). Use os.path.splitext instead.
     original_filename = file.filename
-    filename = secure_filename(file.filename)
+    original_ext = os.path.splitext(file.filename)[1]  # e.g. ".pdf"
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    unique_filename = f"sec_{current_user.id}_{timestamp}_{filename}"
+    unique_filename = f"sec_{current_user.id}_{timestamp}{original_ext}"
 
     # Create upload directory if not exists
     upload_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'documents')
@@ -1121,7 +1128,8 @@ def api_set_contact_person(id):
     if contact_user.role not in ('contact_person', 'secretary', 'admin'):
         return jsonify({'success': False, 'message': '只能指定联系人、书记或管理员作为入党联系人'}), 400
 
-    if contact_user.branch_id != application.branch_id:
+    # Admin users have branch_id=None but can serve as contacts for any branch
+    if contact_user.role != 'admin' and contact_user.branch_id != application.branch_id:
         return jsonify({'success': False, 'message': '联系人必须属于同一支部'}), 400
 
     # Update the application's contact_person_id
@@ -1167,8 +1175,12 @@ def api_get_contact_candidates(id):
         return jsonify({'success': False, 'message': '无权访问该申请人'}), 403
 
     # Query candidate users: contact_person, secretary, and admin users in the same branch
+    # Also include admin users regardless of branch (admin has branch_id=None, would be excluded otherwise)
     candidates = User.query.filter(
-        User.branch_id == application.branch_id,
+        db.or_(
+            User.branch_id == application.branch_id,
+            User.role == 'admin'  # admins can be contacts for any branch
+        ),
         User.role.in_(['contact_person', 'secretary', 'admin']),
         User.is_active == True
     ).all()

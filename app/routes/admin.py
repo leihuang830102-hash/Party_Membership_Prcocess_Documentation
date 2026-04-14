@@ -544,6 +544,7 @@ def create_user():
     db.session.commit()
 
     return jsonify({
+        'success': True,
         'message': '用户创建成功',
         'user': {
             'id': user.id,
@@ -891,14 +892,13 @@ def upload_template():
     if not name:
         return jsonify({'error': '模板名称为必填项'}), 400
 
-    # Secure filename and save
+    # Build safe filename preserving original extension (even for Chinese filenames)
+    # secure_filename() strips Chinese characters, losing the file extension entirely
+    # e.g. "入党申请书模板.docx" -> "docx" (no dot). Use os.path.splitext instead.
     original_filename = file.filename
-    filename = secure_filename(original_filename)
-
-    # Add timestamp to avoid filename conflicts
+    original_ext = os.path.splitext(original_filename)[1]  # e.g. ".docx"
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-    name_part, ext = os.path.splitext(filename)
-    filename = f"{name_part}_{timestamp}{ext}"
+    filename = f"template_{timestamp}{original_ext}"
 
     # Ensure upload directory exists
     upload_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'templates')
@@ -1480,12 +1480,13 @@ def api_self_service_step(app_id):
                     'error': '不支持的文件类型，请上传 PDF、Word、Excel 或图片文件'
                 }), 400
 
-            # 生成安全的文件名（与 applicant.py 上传逻辑一致）
+            # Build safe filename preserving original extension (even for Chinese filenames)
+            # secure_filename() strips Chinese characters, losing the file extension entirely
             doc_type = request.form.get('doc_type', 'general')
             original_filename = file.filename
-            safe_name = secure_filename(file.filename)
+            original_ext = os.path.splitext(file.filename)[1]  # e.g. ".pdf"
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            unique_filename = f"{current_user.id}_{timestamp}_{safe_name}"
+            unique_filename = f"{current_user.id}_{timestamp}{original_ext}"
 
             # 确保上传目录存在
             upload_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'documents')
@@ -1635,11 +1636,12 @@ def api_self_service_step_upload(app_id):
             'error': '不支持的文件类型，请上传 PDF、Word、Excel 或图片文件'
         }), 400
 
-    # 生成安全的文件名
+    # Build safe filename preserving original extension (even for Chinese filenames)
+    # secure_filename() strips Chinese characters, losing the file extension entirely
     original_filename = file.filename
-    safe_name = secure_filename(file.filename)
+    original_ext = os.path.splitext(file.filename)[1]  # e.g. ".pdf"
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    unique_filename = f"{current_user.id}_{timestamp}_{safe_name}"
+    unique_filename = f"{current_user.id}_{timestamp}{original_ext}"
 
     # 确保上传目录存在
     upload_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'documents')

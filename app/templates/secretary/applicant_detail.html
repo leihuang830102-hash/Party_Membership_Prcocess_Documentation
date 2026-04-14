@@ -193,6 +193,9 @@
                                 <p class="status-text pending">此步骤由党委处理</p>
                                 {% endif %}
                                 {% endif %}
+                                {% elif step.status == 'secretary_approved' %}
+                                <p class="status-text" style="color: #1565C0;">已通过初审 - 等待上级党委审批</p>
+                                <p class="time-text">{{ step.completed_at|cn_time if step.completed_at else '' }}</p>
                                 {% else %}
                                 {% if is_current_step and application.status == 'in_progress' %}
                                 {# --- 当前步骤：根据 secretary_role 显示不同操作 --- #}

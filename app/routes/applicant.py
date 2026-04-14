@@ -638,11 +638,13 @@ def api_upload_document():
             'message': waiting_msg
         }), 403
 
-    # Secure filename and create upload path
+    # Build safe filename preserving original extension (even for Chinese filenames)
+    # secure_filename() strips Chinese characters, losing the file extension entirely
+    # e.g. "入党申请书.pdf" -> "pdf" (no dot, no extension). Use os.path.splitext instead.
     original_filename = file.filename
-    filename = secure_filename(file.filename)
+    original_ext = os.path.splitext(file.filename)[1]  # e.g. ".pdf" — preserved before any sanitization
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    unique_filename = f"{current_user.id}_{timestamp}_{filename}"
+    unique_filename = f"{current_user.id}_{timestamp}{original_ext}"
 
     # Create upload directory if not exists
     upload_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'documents')

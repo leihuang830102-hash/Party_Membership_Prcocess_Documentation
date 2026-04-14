@@ -322,9 +322,6 @@ async function loadDocuments() {
                                 <span class="status-badge status-${getStatusClass(doc.status)}">${getStatusText(doc.status)}</span>
                             </div>
                     </div>
-                    <div class="document-actions">
-                        <button class="btn btn-sm btn-secondary" onclick="viewDocument(${doc.id})">查看</button>
-                    </div>
                 </div>
             `).join('');
         } else {
@@ -364,7 +361,9 @@ function getStatusClass(status) {
 }
 
 function viewDocument(id) {
-    window.open(`/secretary/documents/${id}`, '_blank');
+    // Document viewing is now handled through the step-level approval workflow.
+    // The individual document view route no longer exists.
+    alert('文档查看已整合到步骤审批流程中，请通过申请人详情页面查看文档。');
 }
 
 // 弃用提示：approveDocument 和 rejectDocument 函数已移除。
