@@ -3,15 +3,33 @@ Secretary routes for the Party Membership Application Management System.
 Secretary can manage applicants and documents within their own branch.
 """
 
+import os
 from datetime import date, datetime, timezone, timedelta
-from flask import Blueprint, render_template, jsonify, request, flash
+from flask import Blueprint, render_template, jsonify, request, flash, current_app
 from flask_login import login_required, current_user
 from functools import wraps
-from app.models import User, Application, StepRecord, Document, StepDefinition, Branch, ContactAssignment
+from werkzeug.utils import secure_filename
+from app.models import User, Application, StepRecord, Document, StepDefinition, Branch, ContactAssignment, Notification
 from app import db
+
+# 尝试导入 workflow_helpers 辅助模块（该模块可能尚未创建）
+# 如果模块不存在，使用本地的简化实现
+try:
+    from app.workflow_helpers import can_submit, get_allowed_actions, get_step_config, get_step_templates
+    _HAS_WORKFLOW_HELPERS = True
+except ImportError:
+    _HAS_WORKFLOW_HELPERS = False
 
 # China Standard Time (UTC+8) - used for consistent timestamp display
 CHINA_TZ = timezone(timedelta(hours=8))
+
+# 允许上传的文件扩展名
+ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'jpeg', 'png'}
+
+
+def allowed_file(filename):
+    """检查文件扩展名是否允许上传"""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 def cn_time_str(dt, fmt='%Y-%m-%d %H:%M'):
@@ -88,11 +106,32 @@ def dashboard():
     #   item.applicant.name, item.applicant.username,
     #   item.stage, item.step, item.submit_time,
     #   item.todo_type, item.todo_label, item.applicant.id
+    #   item.secretary_role - NEW: 'approver'/'submitter'/'none'
     pending_list = []
     for app in pending_applications:
         # Resolve the step definition name for a readable step label
         step_def = StepDefinition.query.filter_by(step_code=app.current_step).first()
         step_name = step_def.name if step_def else app.current_step
+
+        # === 步骤级别工作流控制：判断 secretary 在当前步骤的角色 ===
+        approval_type = getattr(step_def, 'approval_type', 'two_level') if step_def else 'two_level'
+        submitter_role = getattr(step_def, 'submitter_role', 'applicant') if step_def else 'applicant'
+
+        if approval_type == 'two_level':
+            # 书记作为初审人，可以审批/驳回申请人提交的文档
+            secretary_role = 'approver'
+            todo_type = 'review'
+            todo_label = '待审核'
+        elif approval_type == 'one_level' and submitter_role == 'secretary':
+            # 书记作为提交者，需要上传文档提交给管理员审批
+            secretary_role = 'submitter'
+            todo_type = 'submit'
+            todo_label = '待提交'
+        else:
+            # approval_type == 'none' 或其他：书记无角色，不显示操作
+            secretary_role = 'none'
+            todo_type = 'none'
+            todo_label = '管理员处理中'
 
         pending_list.append({
             'applicant': {
@@ -104,12 +143,15 @@ def dashboard():
             'stage': f'第{app.current_stage}阶段',
             'step': step_name,
             'submit_time': app.updated_at,
-            # Default todo type/label for pending items on the dashboard
-            'todo_type': 'review',
-            'todo_label': '待审核',
+            'todo_type': todo_type,
+            'todo_label': todo_label,
+            # 新增字段：书记在当前步骤的角色
+            'secretary_role': secretary_role,
+            'approval_type': approval_type,
         })
 
     # Query pending documents awaiting secretary review in this branch
+    # Only include documents for steps where secretary has a review role (two_level steps)
     pending_documents = Document.query.join(Application).filter(
         Application.branch_id == branch_id,
         Document.review_status == 'pending'
@@ -120,6 +162,23 @@ def dashboard():
         # Resolve step definition name for the document's step
         step_def = StepDefinition.query.filter_by(step_code=doc.step_code).first()
         step_name = step_def.name if step_def else (doc.step_code or '')
+
+        # 判断文档所属步骤的审批类型，确定书记角色
+        doc_approval_type = getattr(step_def, 'approval_type', 'two_level') if step_def else 'two_level'
+        if doc_approval_type == 'two_level':
+            doc_secretary_role = 'approver'
+            doc_todo_type = 'document_review'
+            doc_todo_label = '待审核文档'
+        elif doc_approval_type == 'one_level':
+            # one_level 文档由书记自己上传，不需要书记审核
+            # 这些文档在列表中显示为"已提交"状态而非待审核
+            doc_secretary_role = 'submitter'
+            doc_todo_type = 'document_submitted'
+            doc_todo_label = '已提交待审批'
+        else:
+            doc_secretary_role = 'none'
+            doc_todo_type = 'none'
+            doc_todo_label = '管理员处理中'
 
         # Get the applicant (user who owns the application)
         applicant = doc.application.user if doc.application else None
@@ -135,11 +194,14 @@ def dashboard():
             'stage': f'第{doc.application.current_stage}阶段' if doc.application else '',
             'step': step_name,
             'submit_time': doc.uploaded_at,
-            'todo_type': 'document_review',
-            'todo_label': '待审核文档',
+            'todo_type': doc_todo_type,
+            'todo_label': doc_todo_label,
             # Extra fields specific to document review items
             'doc_name': doc.original_filename or doc.filename,
             'doc_id': doc.id,
+            # 新增字段：文档所属步骤的工作流信息
+            'secretary_role': doc_secretary_role,
+            'approval_type': doc_approval_type,
         })
 
     # Sort combined list by submit_time descending (most recent first)
@@ -343,16 +405,22 @@ def api_get_applicant(id):
 @secretary_required
 def api_approve_step(id):
     """
-    Approve or reject an application step.
+    Approve or reject an application step (secretary as L1 approver for two_level steps).
+
+    Secretary only has approval authority for 'two_level' approval_type steps,
+    where the secretary acts as the first-level reviewer before admin final approval.
+
+    For 'one_level' steps, secretary is the submitter (not approver) — use submit-step endpoint.
+    For 'none' steps, secretary has no role — admin-only.
 
     Request body:
     - step_code: the step to approve/reject
     - action: 'approve' or 'reject' (default: 'approve' for backward compatibility)
     - result: optional result/notes/rejection reason
 
-    Behavior:
-    - Approve: marks step as completed, advances current_step to next step
-    - Reject: marks step as failed, keeps current_step unchanged so applicant can re-apply
+    Behavior (two_level steps):
+    - Approve: marks step as 'secretary_approved', does NOT advance step — waits for admin
+    - Reject: marks step as 'failed', keeps current_step unchanged so applicant can re-apply
     """
     application = Application.query.get_or_404(id)
 
@@ -388,6 +456,26 @@ def api_approve_step(id):
     if not step_def:
         return jsonify({'success': False, 'message': '无效的步骤代码'}), 400
 
+    # === 步骤级别工作流控制：检查 secretary 是否有审批权限 ===
+    approval_type = getattr(step_def, 'approval_type', 'two_level')  # 向后兼容：旧数据默认 two_level
+
+    # 对于 one_level 步骤，secretary 是提交者而非审批者
+    if approval_type == 'one_level':
+        return jsonify({
+            'success': False,
+            'message': '该步骤由书记提交，需使用提交接口（submit-step）'
+        }), 400
+
+    # 对于 none 步骤，secretary 无角色
+    if approval_type == 'none':
+        return jsonify({
+            'success': False,
+            'message': '该步骤为管理员专用，书记无权操作'
+        }), 400
+
+    # 只有 two_level 步骤，secretary 才能审批（作为初审人）
+    # approval_type == 'two_level' — 继续处理
+
     # Find or create step record
     step_record = StepRecord.query.filter_by(
         application_id=id,
@@ -403,34 +491,38 @@ def api_approve_step(id):
         db.session.add(step_record)
 
     if action == 'approve':
-        # Approve: mark step as completed and advance to next step
-        step_record.status = 'completed'
+        # two_level 审批：书记初审通过，设置为 'secretary_approved'
+        # 步骤不推进，等待管理员最终审批后才完成
+        step_record.status = 'secretary_approved'
         step_record.result = result
         step_record.completed_at = datetime.utcnow()
         step_record.completed_by = current_user.id
 
-        # Advance to the next step in sequence
-        next_step = StepDefinition.query.filter(
-            StepDefinition.order_num > step_def.order_num
-        ).order_by(StepDefinition.order_num).first()
+        # 同步更新该步骤关联文档的审核状态为 secretary_approved
+        pending_docs = Document.query.filter_by(
+            application_id=id,
+            step_code=step_code,
+            review_status='pending'
+        ).all()
+        for doc in pending_docs:
+            doc.review_status = 'secretary_approved'
+            doc.reviewed_by = current_user.id
+            doc.reviewed_at = datetime.utcnow()
 
-        if next_step:
-            application.current_step = next_step.step_code
-            application.current_stage = next_step.stage
-        else:
-            # All steps completed - mark application as completed
-            application.status = 'completed'
+        # 注意：不推进 application.current_step，等待管理员最终审批
 
         db.session.commit()
 
         return jsonify({
             'success': True,
-            'message': '步骤已通过',
+            'message': '步骤已通过初审，等待党委最终审批',
             'data': {
                 'step_code': step_code,
-                'status': 'completed',
+                'status': 'secretary_approved',
                 'completed_at': step_record.completed_at.isoformat(),
-                'next_step': next_step.step_code if next_step else None
+                # current_step 不变，等待管理员审批
+                'current_step': application.current_step,
+                'needs_admin_approval': True
             }
         })
 
@@ -441,6 +533,16 @@ def api_approve_step(id):
         step_record.result = result if result else '步骤被驳回'
         step_record.completed_at = datetime.utcnow()
         step_record.completed_by = current_user.id
+
+        # 同步驳回该步骤关联的文档
+        pending_docs = Document.query.filter_by(
+            application_id=id,
+            step_code=step_code
+        ).filter(Document.review_status.in_(['pending', 'secretary_approved'])).all()
+        for doc in pending_docs:
+            doc.review_status = 'secretary_rejected'
+            doc.reviewed_by = current_user.id
+            doc.reviewed_at = datetime.utcnow()
 
         # IMPORTANT: Do NOT advance current_step. The step stays as current
         # so the applicant can see the rejection and re-apply.
@@ -459,6 +561,275 @@ def api_approve_step(id):
                 'current_step': application.current_step
             }
         })
+
+
+@secretary_bp.route('/api/applicants/<int:id>/submit-step', methods=['POST'])
+@secretary_required
+def api_submit_step(id):
+    """
+    Secretary submits a document for a one_level approval step.
+    For one_level steps, secretary is the submitter and admin is the approver.
+
+    Expects multipart/form-data with:
+        - file: The document file (required)
+        - step_code: The step code to submit for (required)
+        - doc_type: Document type (optional, default 'general')
+
+    Behavior:
+    - Validates step_def.submitter_role == 'secretary' and approval_type == 'one_level'
+    - Validates application.current_step matches step_code
+    - Uploads file to the same directory structure as applicant uploads
+    - Creates Document with review_status='pending'
+    - Creates/updates StepRecord with status='pending'
+    - Creates notification to admin users in the same branch
+    """
+    application = Application.query.get_or_404(id)
+
+    # Secretary can only submit for applicants from their own branch
+    if application.branch_id != current_user.branch_id:
+        return jsonify({'success': False, 'message': '无权操作该申请人'}), 403
+
+    # Check application is in progress
+    if application.status != 'in_progress':
+        return jsonify({'success': False, 'message': '该申请已结束'}), 400
+
+    # Get form data
+    step_code = request.form.get('step_code')
+    doc_type = request.form.get('doc_type', 'general')
+
+    if not step_code:
+        return jsonify({'success': False, 'message': '缺少步骤代码'}), 400
+
+    # Get step definition and validate workflow config
+    step_def = StepDefinition.query.filter_by(step_code=step_code).first()
+    if not step_def:
+        return jsonify({'success': False, 'message': '无效的步骤代码'}), 400
+
+    approval_type = getattr(step_def, 'approval_type', 'two_level')
+    submitter_role = getattr(step_def, 'submitter_role', 'applicant')
+
+    # 验证：只有 one_level + submitter_role=secretary 的步骤才能用此接口
+    if approval_type != 'one_level':
+        return jsonify({
+            'success': False,
+            'message': f'该步骤审批类型为 {approval_type}，不适用书记提交接口'
+        }), 400
+
+    if submitter_role != 'secretary':
+        return jsonify({
+            'success': False,
+            'message': f'该步骤提交者为 {submitter_role}，非书记角色'
+        }), 400
+
+    # Validate: only the current step can be submitted
+    if application.current_step != step_code:
+        return jsonify({
+            'success': False,
+            'message': f'只能提交当前步骤（当前步骤: {application.current_step}）'
+        }), 400
+
+    # Check file is present
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'message': '请选择要上传的文件'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'message': '请选择要上传的文件'}), 400
+
+    # Check file extension
+    if not allowed_file(file.filename):
+        return jsonify({
+            'success': False,
+            'message': '不支持的文件类型，请上传 PDF、Word、Excel 或图片文件'
+        }), 400
+
+    # Secure filename and create upload path (same directory structure as applicant)
+    original_filename = file.filename
+    filename = secure_filename(file.filename)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    unique_filename = f"sec_{current_user.id}_{timestamp}_{filename}"
+
+    # Create upload directory if not exists
+    upload_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'documents')
+    os.makedirs(upload_dir, exist_ok=True)
+
+    file_path = os.path.join(upload_dir, unique_filename)
+
+    try:
+        # Save file
+        file.save(file_path)
+        file_size = os.path.getsize(file_path)
+
+        # Create document record
+        document = Document(
+            application_id=application.id,
+            step_code=step_code,
+            doc_type=doc_type,
+            filename=unique_filename,
+            original_filename=original_filename,
+            file_path=file_path,
+            file_size=file_size,
+            uploaded_by=current_user.id,
+            review_status='pending'  # 等待管理员审批
+        )
+        db.session.add(document)
+
+        # Create or update step record
+        step_record = StepRecord.query.filter_by(
+            application_id=id,
+            step_code=step_code
+        ).first()
+
+        if not step_record:
+            step_record = StepRecord(
+                application_id=id,
+                step_code=step_code,
+                status='pending'
+            )
+            db.session.add(step_record)
+        else:
+            # 如果之前被驳回，重置为 pending
+            step_record.status = 'pending'
+            step_record.result = None
+            step_record.completed_at = None
+            step_record.completed_by = None
+
+        # Create notification to admin users in the same branch
+        # 通知管理员：书记已提交文档，请审批
+        admin_users = User.query.filter_by(
+            branch_id=application.branch_id,
+            role='admin',
+            is_active=True
+        ).all()
+
+        applicant_name = application.user.name if application.user else '未知'
+        step_name = step_def.name or step_code
+
+        for admin in admin_users:
+            notification = Notification(
+                user_id=admin.id,
+                title=f'书记提交文档待审批 - {applicant_name}',
+                content=f'{current_user.name} 已为 {applicant_name} 提交了 {step_name} 的文档，请及时审批。',
+                link=f'/admin/applicant/{application.id}'
+            )
+            db.session.add(notification)
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': '文档提交成功，等待管理员审批',
+            'data': {
+                'document_id': document.id,
+                'filename': original_filename,
+                'doc_type': doc_type,
+                'step_code': step_code,
+                'step_name': step_name,
+                'file_size': file_size,
+                'review_status': 'pending'
+            }
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        # Clean up file if database save fails
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        return jsonify({
+            'success': False,
+            'message': f'提交失败：{str(e)}'
+        }), 500
+
+
+@secretary_bp.route('/api/applicants/<int:id>/step-actions', methods=['GET'])
+@secretary_required
+def api_get_step_actions(id):
+    """
+    Get allowed actions for the current step of an application.
+    This tells the frontend what the secretary can do with the current step:
+    - 'approve'/'reject': for two_level steps where secretary is L1 approver
+    - 'submit': for one_level steps where secretary is submitter
+    - nothing: for none steps (admin-only)
+
+    Returns JSON with step config and allowed actions:
+    {
+        "step_code": "L2",
+        "approval_type": "one_level",
+        "submitter_role": "secretary",
+        "allowed_actions": ["submit", "download_template"]
+    }
+    """
+    application = Application.query.get_or_404(id)
+
+    # Secretary can only view applicants from their own branch
+    if application.branch_id != current_user.branch_id:
+        return jsonify({'success': False, 'message': '无权访问该申请人'}), 403
+
+    step_code = application.current_step
+    step_def = StepDefinition.query.filter_by(step_code=step_code).first()
+
+    if not step_def:
+        return jsonify({'success': False, 'message': '未找到步骤定义'}), 404
+
+    approval_type = getattr(step_def, 'approval_type', 'two_level')
+    submitter_role = getattr(step_def, 'submitter_role', 'applicant')
+
+    # Determine allowed actions based on workflow config
+    allowed_actions = []
+
+    if approval_type == 'two_level':
+        # Secretary is L1 approver — can approve or reject applicant submissions
+        allowed_actions = ['approve', 'reject']
+    elif approval_type == 'one_level' and submitter_role == 'secretary':
+        # Secretary is submitter — can upload/submit documents
+        allowed_actions = ['submit', 'download_template']
+    elif approval_type == 'none':
+        # Admin-only step — secretary has no actions
+        allowed_actions = []
+
+    # Check if there are templates available for this step
+    has_templates = False
+    if _HAS_WORKFLOW_HELPERS:
+        try:
+            templates = get_step_templates(step_code)
+            has_templates = bool(templates)
+        except Exception:
+            has_templates = False
+    else:
+        # 如果 workflow_helpers 不存在，检查 step_def.required_templates
+        if step_def.required_templates:
+            try:
+                import json as _json
+                tmpl = _json.loads(step_def.required_templates)
+                has_templates = bool(tmpl)
+            except (ValueError, TypeError):
+                has_templates = False
+
+    # 获取当前步骤的 step_record 状态（用于前端显示）
+    step_record = StepRecord.query.filter_by(
+        application_id=id,
+        step_code=step_code
+    ).first()
+    current_status = step_record.status if step_record else 'not_started'
+
+    result = {
+        'step_code': step_code,
+        'step_name': step_def.name,
+        'stage': step_def.stage,
+        'approval_type': approval_type,
+        'submitter_role': submitter_role,
+        'allowed_actions': allowed_actions,
+        'has_templates': has_templates,
+        'current_status': current_status,
+        # secretary 在此步骤的角色描述
+        'secretary_role': (
+            'approver' if approval_type == 'two_level'
+            else 'submitter' if (approval_type == 'one_level' and submitter_role == 'secretary')
+            else 'none'
+        )
+    }
+
+    return jsonify({'success': True, 'data': result})
 
 
 @secretary_bp.route('/api/documents', methods=['GET'])
@@ -522,6 +893,12 @@ def api_get_documents():
     for doc in documents:
         # Get applicant name from the document's application
         applicant_name = doc.application.user.name if doc.application and doc.application.user else None
+
+        # 获取文档所属步骤的工作流配置
+        doc_step_def = StepDefinition.query.filter_by(step_code=doc.step_code).first() if doc.step_code else None
+        doc_approval_type = getattr(doc_step_def, 'approval_type', 'two_level') if doc_step_def else 'two_level'
+        doc_submitter_role = getattr(doc_step_def, 'submitter_role', 'applicant') if doc_step_def else 'applicant'
+
         result.append({
             'id': doc.id,
             'filename': doc.original_filename or doc.filename,
@@ -531,6 +908,13 @@ def api_get_documents():
             'uploaded_at': cn_time_str(doc.uploaded_at),
             'applicant_name': applicant_name,
             'status': doc.review_status or 'pending',
+            # 新增字段：工作流信息，供前端判断可执行操作
+            'approval_type': doc_approval_type,
+            'secretary_role': (
+                'approver' if doc_approval_type == 'two_level'
+                else 'submitter' if (doc_approval_type == 'one_level' and doc_submitter_role == 'secretary')
+                else 'none'
+            ),
         })
 
     return jsonify({'success': True, 'documents': result})
@@ -543,6 +927,10 @@ def api_review_document(id):
     Review a document (approve or reject).
     Updates the Document's review_status, reviewed_by, reviewed_at, review_comment,
     and also updates the linked StepRecord if the document has a step_code.
+
+    For two_level steps: secretary approve sets document to 'secretary_approved' (waits for admin).
+    Step does NOT advance — only admin final approval advances the step.
+    For one_level steps: this endpoint should not be called (secretary is submitter, not reviewer).
 
     Request body:
     - action: 'approve' or 'reject'
@@ -561,6 +949,17 @@ def api_review_document(id):
 
     if action not in ['approve', 'reject']:
         return jsonify({'success': False, 'message': '无效的操作类型'}), 400
+
+    # === 检查文档所属步骤的工作流配置 ===
+    step_def = StepDefinition.query.filter_by(step_code=document.step_code).first() if document.step_code else None
+    approval_type = getattr(step_def, 'approval_type', 'two_level') if step_def else 'two_level'
+
+    # 对于 one_level 步骤的文档，书记是提交者，不能审核自己的文档
+    if approval_type == 'one_level':
+        return jsonify({
+            'success': False,
+            'message': '该文档属于书记提交步骤，由管理员审批'
+        }), 400
 
     # Update Document's own review status using two-level status values.
     # Secretary approve: pending -> secretary_approved (waits for admin review)
@@ -584,24 +983,15 @@ def api_review_document(id):
                 step_record.status = 'failed'
                 step_record.result = f'文档审核不通过: {comment}' if comment else '文档审核不通过'
             else:
-                # Mark step as completed on approval
-                step_record.status = 'completed'
-                step_record.result = f'文档审核通过: {comment}' if comment else '文档审核通过'
+                # two_level 审批：书记审核通过，设置为 secretary_approved
+                # 步骤不推进，等待管理员最终审批
+                step_record.status = 'secretary_approved'
+                step_record.result = f'文档初审通过: {comment}' if comment else '文档初审通过'
                 step_record.completed_at = datetime.utcnow()
                 step_record.completed_by = current_user.id
 
-                # Advance application to next step if this was the current step
-                if application.current_step == document.step_code:
-                    step_def = StepDefinition.query.filter_by(step_code=document.step_code).first()
-                    if step_def:
-                        next_step = StepDefinition.query.filter(
-                            StepDefinition.order_num > step_def.order_num
-                        ).order_by(StepDefinition.order_num).first()
-                        if next_step:
-                            application.current_step = next_step.step_code
-                            application.current_stage = next_step.stage
-                        else:
-                            application.status = 'completed'
+                # 注意：不推进 application.current_step，等待管理员最终审批
+                # 管理员审批通过后才推进到下一步
 
     db.session.commit()
 

@@ -33,6 +33,14 @@
     <div class="card card-decorated mb-lg">
         <div class="card-header">
             <h3 class="card-title">当前审批步骤</h3>
+            {# 审批类型徽章 - 根据 approval_type 显示不同的标签 #}
+            {% if step_def.approval_type == 'two_level' %}
+            <span class="approval-type-badge badge-two-level">二级审批 - 最终审批</span>
+            {% elif step_def.approval_type == 'one_level' %}
+            <span class="approval-type-badge badge-one-level">一级审批</span>
+            {% elif step_def.approval_type == 'none' %}
+            <span class="approval-type-badge badge-self-service">自助服务</span>
+            {% endif %}
         </div>
         <div class="card-body">
             <div class="step-info">
@@ -43,20 +51,167 @@
                 </div>
             </div>
 
+            {# 书记审批意见：仅二级审批步骤显示（表示书记已审批，待管理员最终审批） #}
             {% if step_record and step_record.result %}
             <div class="previous-result">
-                <span class="label">书记审批意见：</span>
+                <span class="label">
+                    {% if step_def.approval_type == 'two_level' %}
+                    书记审批意见：
+                    {% elif step_def.approval_type == 'one_level' %}
+                    备注：
+                    {% else %}
+                    意见：
+                    {% endif %}
+                </span>
                 <span class="result">{{ step_record.result }}</span>
+            </div>
+            {% endif %}
+
+            {# 审批流程提示信息 - 帮助管理员理解当前步骤在流程中的位置 #}
+            {% if step_def.approval_type == 'two_level' %}
+            <div class="flow-hint flow-hint-two-level">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                </svg>
+                <span>此步骤为二级审批流程：书记已审批通过，您是最终审批人</span>
+            </div>
+            {% elif step_def.approval_type == 'one_level' %}
+            <div class="flow-hint flow-hint-one-level">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                </svg>
+                <span>此步骤为一级审批流程：书记已提交文档，您是唯一审批人</span>
             </div>
             {% endif %}
         </div>
     </div>
     {% endif %}
 
+    {# ============================================
+       自助服务步骤区块 (approval_type='none')
+       当步骤为 none 类型时，显示文件上传和确认完成按钮，
+       不显示传统的审批/驳回表单。
+       ============================================ #}
+    {% if step_def and step_def.approval_type == 'none' %}
+    <div class="card card-decorated mb-lg">
+        <div class="card-header">
+            <h3 class="card-title">自助服务操作</h3>
+        </div>
+        <div class="card-body">
+            <div class="self-service-section">
+                <p class="self-service-desc">
+                    此步骤无需审批流程，管理员可直接操作完成。您可以上传相关文件后确认完成，也可以直接确认完成。
+                </p>
+
+                {# 文件上传区域 #}
+                <div class="upload-area" id="selfServiceUploadArea">
+                    <div class="upload-area-content">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                        <p>拖拽文件到此处，或点击选择文件</p>
+                        <p class="upload-hint">支持 PDF、Word、Excel、图片格式</p>
+                    </div>
+                    <input type="file" id="selfServiceFileInput" style="display:none;"
+                           accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png">
+                </div>
+
+                {# 上传文件列表（动态填充） #}
+                <div id="uploadedFilesList" class="uploaded-files-list" style="display:none;">
+                    <h4>已上传文件</h4>
+                    <div id="uploadedFilesContent"></div>
+                </div>
+
+                {# 操作按钮 #}
+                <div class="self-service-actions">
+                    <button type="button" class="btn btn-primary btn-lg" id="btnUploadFile" onclick="triggerSelfServiceUpload()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                        上传文件
+                    </button>
+                    <button type="button" class="btn btn-success btn-lg" onclick="confirmSelfServiceStep()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                            <path d="M22 11.08V12a10 10 0 11-5.93-9.14"></path>
+                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        </svg>
+                        确认完成
+                    </button>
+                    <a href="{{ url_for('admin.approval_detail', approval_id=application.id) }}" class="btn btn-secondary btn-lg">取消</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ============================================
+       自助服务申请列表区块
+       仅当路由传递了 self_service_applications 变量时显示，
+       用于在审批页面同时展示其他待处理的自助服务步骤。
+       通过 {% if %} 检查确保向后兼容。
+       ============================================ #}
+    {% if self_service_applications is defined and self_service_applications %}
+    <div class="card card-decorated mb-lg">
+        <div class="card-header">
+            <h3 class="card-title">其他自助服务步骤</h3>
+            <div class="list-summary">
+                共 <span class="highlight">{{ self_service_applications|length }}</span> 条待处理
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="self-service-list">
+                {% for ssa in self_service_applications %}
+                <div class="self-service-item" data-app-id="{{ ssa.id }}" data-step-code="{{ ssa.current_step }}">
+                    <div class="self-service-item-info">
+                        <div class="self-service-item-avatar">{{ ssa.user.name[0] if ssa.user and ssa.user.name else '?' }}</div>
+                        <div class="self-service-item-details">
+                            <h4>{{ ssa.user.name if ssa.user else '-' }}</h4>
+                            <p>{{ ssa.branch.name if ssa.branch else '-' }}</p>
+                            <span class="self-service-step-badge">{{ ssa.current_step }}</span>
+                        </div>
+                    </div>
+                    <div class="self-service-item-actions">
+                        <button type="button" class="btn btn-sm btn-outline"
+                                onclick="uploadForSelfService({{ ssa.id }}, '{{ ssa.current_step }}')">
+                            上传文件
+                        </button>
+                        <button type="button" class="btn btn-sm btn-success"
+                                onclick="confirmSelfServiceForApp({{ ssa.id }}, '{{ ssa.current_step }}')">
+                            确认完成
+                        </button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% else %}
+    {# ============================================
+       非自助服务步骤：显示传统的文档审批表单
+       适用于 two_level 和 one_level 审批类型
+       ============================================ #}
+
     <!-- 相关文档 -->
     <div class="card card-decorated mb-lg">
         <div class="card-header">
             <h3 class="card-title">相关文档</h3>
+            {# 文档状态标签根据审批类型区分显示 #}
+            {% if documents and documents|length > 0 %}
+                {% if step_def and step_def.approval_type == 'two_level' %}
+                <span class="doc-status-label status-secretary-approved">待最终审批（书记已审批）</span>
+                {% elif step_def and step_def.approval_type == 'one_level' %}
+                <span class="doc-status-label status-pending-secretary">待审批（书记提交）</span>
+                {% endif %}
+            {% endif %}
         </div>
         <div class="card-body">
             {% if documents and documents|length > 0 %}
@@ -84,10 +239,48 @@
         </div>
     </div>
 
+    {# ============================================
+       模板下载链接区域
+       当路由传递了 step_templates 变量时显示，
+       帮助管理员了解当前步骤需要哪些文档模板。
+       ============================================ #}
+    {% if step_templates is defined and step_templates %}
+    <div class="card card-decorated mb-lg">
+        <div class="card-header">
+            <h3 class="card-title">步骤模板下载</h3>
+        </div>
+        <div class="card-body">
+            <div class="templates-list">
+                {% for tmpl in step_templates %}
+                <div class="template-item">
+                    <div class="template-info">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
+                            <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <span class="template-name">{{ tmpl.name }}</span>
+                    </div>
+                    {% if tmpl.id %}
+                    <a href="{{ url_for('applicant.download_template', id=tmpl.id) }}" class="btn btn-sm btn-outline" download>
+                        下载模板
+                    </a>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- 审批表单 -->
     <div class="card card-decorated">
         <div class="card-header">
             <h3 class="card-title">审批操作</h3>
+            {# 在审批表单标题旁显示审批类型提示 #}
+            {% if step_def and step_def.approval_type == 'two_level' %}
+            <span class="approval-type-badge badge-two-level">二级审批 - 最终审批</span>
+            {% elif step_def and step_def.approval_type == 'one_level' %}
+            <span class="approval-type-badge badge-one-level">一级审批</span>
+            {% endif %}
         </div>
         <div class="card-body">
             <form id="reviewForm" method="POST">
@@ -104,7 +297,11 @@
                             <path d="M22 11.08V12a10 10 0 11-5.93-9.14"></path>
                             <polyline points="22 4 12 14.01 9 11.01"></polyline>
                         </svg>
+                        {% if step_def and step_def.approval_type == 'two_level' %}
+                        最终审批通过
+                        {% else %}
                         审批通过
+                        {% endif %}
                     </button>
                     <button type="button" class="btn btn-danger btn-lg" onclick="submitReview('reject')">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
@@ -119,7 +316,40 @@
             </form>
         </div>
     </div>
+    {% endif %}
+
+    {# ============================================
+       自助服务申请列表（通过 API 动态加载）
+       当审批类型为 none 时，通过 JavaScript
+       从 /admin/api/self-service-applications 加载列表
+       ============================================ #}
+    <div id="selfServiceListContainer" class="card card-decorated mb-lg" style="display:none;">
+        <div class="card-header">
+            <h3 class="card-title">待处理自助服务步骤</h3>
+            <div class="list-summary">
+                共 <span class="highlight" id="selfServiceCount">0</span> 条待处理
+            </div>
+        </div>
+        <div class="card-body">
+            <div id="selfServiceListContent" class="self-service-api-list">
+                {# 动态填充 #}
+            </div>
+            <div id="selfServiceListEmpty" class="empty-state" style="display:none;">
+                <p>暂无待处理的自助服务步骤</p>
+            </div>
+            <div id="selfServiceListLoading" class="loading-state">
+                <p>加载中...</p>
+            </div>
+            <div id="selfServiceListError" class="error-state" style="display:none;">
+                <p>加载失败，请刷新页面重试</p>
+            </div>
+        </div>
+    </div>
 </div>
+
+{# 隐藏的文件上传表单（用于自助服务步骤的文件上传对话框） #}
+<input type="file" id="hiddenFileInput" style="display:none;"
+       accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png">
 
 <style>
 .approval-review-page {
@@ -222,6 +452,78 @@
     color: var(--color-text-primary);
 }
 
+/* 审批类型徽章 */
+.approval-type-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--spacing-xs) var(--spacing-md);
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.badge-two-level {
+    background: rgba(33, 150, 243, 0.12);
+    color: #1565C0;
+    border: 1px solid rgba(33, 150, 243, 0.3);
+}
+
+.badge-one-level {
+    background: rgba(255, 152, 0, 0.12);
+    color: #E65100;
+    border: 1px solid rgba(255, 152, 0, 0.3);
+}
+
+.badge-self-service {
+    background: rgba(76, 175, 80, 0.12);
+    color: #2E7D32;
+    border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+/* 审批流程提示 */
+.flow-hint {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+}
+
+.flow-hint-two-level {
+    background: rgba(33, 150, 243, 0.08);
+    color: #1565C0;
+    border: 1px solid rgba(33, 150, 243, 0.2);
+}
+
+.flow-hint-one-level {
+    background: rgba(255, 152, 0, 0.08);
+    color: #E65100;
+    border: 1px solid rgba(255, 152, 0, 0.2);
+}
+
+/* 文档状态标签 */
+.doc-status-label {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.status-secretary-approved {
+    background: rgba(33, 150, 243, 0.1);
+    color: #1565C0;
+}
+
+.status-pending-secretary {
+    background: rgba(255, 152, 0, 0.1);
+    color: #E65100;
+}
+
 /* 文档网格 */
 .documents-grid {
     display: grid;
@@ -267,6 +569,285 @@
     display: block;
     font-size: 0.8125rem;
     color: var(--color-text-muted);
+}
+
+/* 模板下载列表 */
+.templates-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.template-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: var(--color-bg-light);
+    border-radius: var(--radius-md);
+}
+
+.template-info {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    color: var(--color-primary);
+}
+
+.template-name {
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+/* 自助服务区域 */
+.self-service-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg);
+}
+
+.self-service-desc {
+    color: var(--color-text-secondary);
+    font-size: 0.9375rem;
+    margin: 0;
+    padding: var(--spacing-md);
+    background: var(--color-bg-light);
+    border-radius: var(--radius-md);
+    border-left: 4px solid var(--color-success);
+}
+
+/* 文件上传区域 */
+.upload-area {
+    border: 2px dashed var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-xl);
+    text-align: center;
+    cursor: pointer;
+    transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.upload-area:hover,
+.upload-area.dragover {
+    border-color: var(--color-primary);
+    background: rgba(33, 150, 243, 0.04);
+}
+
+.upload-area-content svg {
+    color: var(--color-text-muted);
+    margin-bottom: var(--spacing-sm);
+}
+
+.upload-area-content p {
+    margin: 0;
+    color: var(--color-text-secondary);
+    font-size: 0.9375rem;
+}
+
+.upload-area-content .upload-hint {
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+    margin-top: var(--spacing-xs);
+}
+
+/* 已上传文件列表 */
+.uploaded-files-list {
+    padding: var(--spacing-md);
+    background: var(--color-bg-light);
+    border-radius: var(--radius-md);
+}
+
+.uploaded-files-list h4 {
+    margin: 0 0 var(--spacing-sm);
+    font-size: 0.9375rem;
+    color: var(--color-text-primary);
+}
+
+.uploaded-file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: white;
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--spacing-xs);
+}
+
+.uploaded-file-name {
+    font-size: 0.875rem;
+    color: var(--color-text-primary);
+}
+
+.uploaded-file-status {
+    font-size: 0.8125rem;
+    color: var(--color-success);
+}
+
+/* 自助服务操作按钮 */
+.self-service-actions {
+    display: flex;
+    gap: var(--spacing-md);
+    flex-wrap: wrap;
+}
+
+.self-service-actions .btn {
+    flex: 1;
+    min-width: 150px;
+}
+
+/* 自助服务列表（服务端渲染） */
+.self-service-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.self-service-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: var(--color-bg-light);
+    border-radius: var(--radius-md);
+    transition: background var(--transition-fast);
+}
+
+.self-service-item:hover {
+    background: var(--color-bg-gray);
+}
+
+.self-service-item-info {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.self-service-item-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--color-success) 0%, #1E6B3D 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.self-service-item-details h4 {
+    margin: 0 0 var(--spacing-xs);
+    font-size: 0.9375rem;
+    color: var(--color-text-primary);
+}
+
+.self-service-item-details p {
+    margin: 0;
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+}
+
+.self-service-step-badge {
+    display: inline-block;
+    padding: 2px var(--spacing-sm);
+    background: rgba(76, 175, 80, 0.12);
+    color: #2E7D32;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-top: var(--spacing-xs);
+}
+
+.self-service-item-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+/* 自助服务 API 列表样式（动态加载） */
+.self-service-api-list .ss-api-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: var(--color-bg-light);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-sm);
+    transition: background var(--transition-fast);
+}
+
+.self-service-api-list .ss-api-item:hover {
+    background: var(--color-bg-gray);
+}
+
+.ss-api-item-info {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.ss-api-item-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--color-success) 0%, #1E6B3D 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.ss-api-item-details h4 {
+    margin: 0 0 var(--spacing-xs);
+    font-size: 0.9375rem;
+    color: var(--color-text-primary);
+}
+
+.ss-api-item-details p {
+    margin: 0;
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+}
+
+.ss-api-step-badge {
+    display: inline-block;
+    padding: 2px var(--spacing-sm);
+    background: rgba(76, 175, 80, 0.12);
+    color: #2E7D32;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.ss-api-item-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+/* 列表摘要 */
+.list-summary {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+}
+
+.list-summary .highlight {
+    color: var(--color-primary);
+    font-weight: 600;
+}
+
+/* 加载与错误状态 */
+.loading-state {
+    text-align: center;
+    padding: var(--spacing-lg);
+    color: var(--color-text-muted);
+}
+
+.error-state {
+    text-align: center;
+    padding: var(--spacing-lg);
+    color: var(--color-error);
 }
 
 /* 表单操作 */
@@ -341,22 +922,49 @@
     color: var(--color-text-muted);
 }
 
+/* 卡片 header flex 布局 */
+.card-decorated .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+}
+
 @media (max-width: 768px) {
     .documents-grid {
         grid-template-columns: 1fr;
     }
 
-    .form-actions {
+    .form-actions,
+    .self-service-actions {
         flex-direction: column;
     }
 
-    .form-actions .btn {
+    .form-actions .btn,
+    .self-service-actions .btn {
         width: 100%;
+    }
+
+    .self-service-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--spacing-sm);
+    }
+
+    .self-service-api-list .ss-api-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--spacing-sm);
     }
 }
 </style>
 
 <script>
+/**
+ * 提交审批操作（传统审批流程）
+ * 用于 two_level 和 one_level 审批类型
+ */
 function submitReview(action) {
     const form = document.getElementById('reviewForm');
     const formData = new FormData(form);
@@ -379,6 +987,389 @@ function submitReview(action) {
     }
 
     form.submit();
+}
+
+/**
+ * ============================================
+ * 自助服务步骤相关函数
+ * 用于 approval_type='none' 的步骤操作
+ * ============================================
+ */
+
+// 当前正在处理的自助服务步骤上下文
+// 用于在文件上传对话框中记录目标 app_id 和 step_code
+let _selfServiceContext = { appId: null, stepCode: null };
+
+/**
+ * 触发自助服务文件上传（当前申请的步骤）
+ */
+function triggerSelfServiceUpload() {
+    const fileInput = document.getElementById('selfServiceFileInput');
+    fileInput.click();
+}
+
+/**
+ * 自助服务文件选择后的上传处理
+ */
+document.addEventListener('DOMContentLoaded', function() {
+    const fileInput = document.getElementById('selfServiceFileInput');
+    if (fileInput) {
+        fileInput.addEventListener('change', function() {
+            if (this.files && this.files.length > 0) {
+                const appId = {{ application.id }};
+                const stepCode = '{{ step_def.step_code if step_def else "" }}';
+                uploadSelfServiceFile(appId, stepCode, this.files[0]);
+                this.value = '';  // 重置 file input 以便重复选择同一文件
+            }
+        });
+    }
+
+    const hiddenFileInput = document.getElementById('hiddenFileInput');
+    if (hiddenFileInput) {
+        hiddenFileInput.addEventListener('change', function() {
+            if (this.files && this.files.length > 0 && _selfServiceContext.appId) {
+                uploadSelfServiceFile(
+                    _selfServiceContext.appId,
+                    _selfServiceContext.stepCode,
+                    this.files[0]
+                );
+                _selfServiceContext = { appId: null, stepCode: null };
+                this.value = '';
+            }
+        });
+    }
+
+    // 拖拽上传支持
+    const uploadArea = document.getElementById('selfServiceUploadArea');
+    if (uploadArea) {
+        uploadArea.addEventListener('click', function() {
+            document.getElementById('selfServiceFileInput').click();
+        });
+
+        uploadArea.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            this.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            this.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', function(e) {
+            e.preventDefault();
+            this.classList.remove('dragover');
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                const appId = {{ application.id }};
+                const stepCode = '{{ step_def.step_code if step_def else "" }}';
+                uploadSelfServiceFile(appId, stepCode, e.dataTransfer.files[0]);
+            }
+        });
+    }
+
+    // 如果当前步骤是 none 类型，通过 API 加载自助服务列表
+    {% if step_def and step_def.approval_type == 'none' %}
+    loadSelfServiceApplications();
+    {% endif %}
+});
+
+/**
+ * 上传自助服务文件到服务器
+ * @param {number} appId - 申请 ID
+ * @param {string} stepCode - 步骤代码
+ * @param {File} file - 要上传的文件
+ */
+function uploadSelfServiceFile(appId, stepCode, file) {
+    // 验证文件类型
+    const allowedExt = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'jpeg', 'png'];
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!allowedExt.includes(ext)) {
+        alert('不支持的文件类型，请上传 PDF、Word、Excel 或图片文件');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('step_code', stepCode);
+    formData.append('doc_type', 'general');
+
+    // 显示上传状态
+    const filesList = document.getElementById('uploadedFilesList');
+    const filesContent = document.getElementById('uploadedFilesContent');
+    filesList.style.display = 'block';
+
+    const uploadingItem = document.createElement('div');
+    uploadingItem.className = 'uploaded-file-item';
+    uploadingItem.innerHTML = '<span class="uploaded-file-name">' + escapeHtml(file.name) + '</span><span class="uploaded-file-status">上传中...</span>';
+    filesContent.appendChild(uploadingItem);
+
+    fetch('/admin/api/self-service-step/' + appId + '/upload', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            uploadingItem.querySelector('.uploaded-file-status').textContent = '已上传';
+            showToast('文件上传成功: ' + escapeHtml(file.name), 'success');
+        } else {
+            uploadingItem.querySelector('.uploaded-file-status').textContent = '上传失败';
+            uploadingItem.querySelector('.uploaded-file-status').style.color = 'var(--color-error)';
+            alert('文件上传失败: ' + (data.error || '未知错误'));
+        }
+    })
+    .catch(error => {
+        uploadingItem.querySelector('.uploaded-file-status').textContent = '上传失败';
+        uploadingItem.querySelector('.uploaded-file-status').style.color = 'var(--color-error)';
+        console.error('Upload error:', error);
+        alert('文件上传失败，请检查网络连接后重试');
+    });
+}
+
+/**
+ * 确认完成当前自助服务步骤（不带文件上传）
+ */
+function confirmSelfServiceStep() {
+    const appId = {{ application.id }};
+    const stepCode = '{{ step_def.step_code if step_def else "" }}';
+
+    if (!confirm('确认要完成此步骤吗？完成后将自动推进到下一步。')) {
+        return;
+    }
+
+    fetch('/admin/api/self-service-step/' + appId, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            step_code: stepCode,
+            result: '管理员确认完成'
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('步骤已完成', 'success');
+            // 延迟跳转回审批详情页
+            setTimeout(function() {
+                window.location.href = '{{ url_for("admin.approval_detail", approval_id=application.id) }}';
+            }, 1000);
+        } else {
+            alert('操作失败: ' + (data.error || '未知错误'));
+        }
+    })
+    .catch(error => {
+        console.error('Confirm step error:', error);
+        alert('操作失败，请检查网络连接后重试');
+    });
+}
+
+/**
+ * 为其他申请的自助服务步骤上传文件
+ * 通过隐藏的 file input 触发
+ * @param {number} appId - 目标申请 ID
+ * @param {string} stepCode - 目标步骤代码
+ */
+function uploadForSelfService(appId, stepCode) {
+    _selfServiceContext = { appId: appId, stepCode: stepCode };
+    document.getElementById('hiddenFileInput').click();
+}
+
+/**
+ * 为其他申请的自助服务步骤确认完成
+ * @param {number} appId - 目标申请 ID
+ * @param {string} stepCode - 目标步骤代码
+ */
+function confirmSelfServiceForApp(appId, stepCode) {
+    if (!confirm('确认要完成此步骤吗？完成后将自动推进到下一步。')) {
+        return;
+    }
+
+    fetch('/admin/api/self-service-step/' + appId, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            step_code: stepCode,
+            result: '管理员确认完成'
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('步骤已完成', 'success');
+            // 从列表中移除已完成的项目
+            const item = document.querySelector('.self-service-item[data-app-id="' + appId + '"]');
+            if (item) {
+                item.style.opacity = '0';
+                item.style.transition = 'opacity 0.3s';
+                setTimeout(function() { item.remove(); }, 300);
+            }
+        } else {
+            alert('操作失败: ' + (data.error || '未知错误'));
+        }
+    })
+    .catch(error => {
+        console.error('Confirm step error:', error);
+        alert('操作失败，请检查网络连接后重试');
+    });
+}
+
+/**
+ * 通过 API 加载自助服务申请列表
+ * 从 /admin/api/self-service-applications 获取数据
+ */
+function loadSelfServiceApplications() {
+    const container = document.getElementById('selfServiceListContainer');
+    const content = document.getElementById('selfServiceListContent');
+    const empty = document.getElementById('selfServiceListEmpty');
+    const loading = document.getElementById('selfServiceListLoading');
+    const errorEl = document.getElementById('selfServiceListError');
+    const countEl = document.getElementById('selfServiceCount');
+
+    fetch('/admin/api/self-service-applications')
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('HTTP ' + response.status);
+        }
+        return response.json();
+    })
+    .then(data => {
+        loading.style.display = 'none';
+
+        const apps = data.applications || [];
+        countEl.textContent = apps.length;
+
+        if (apps.length === 0) {
+            // 没有待处理的自助服务步骤，不显示此区块
+            container.style.display = 'none';
+            return;
+        }
+
+        container.style.display = 'block';
+
+        // 排除当前正在处理的申请（因为上面已经有专门的操作区域）
+        const currentAppId = {{ application.id }};
+        const otherApps = apps.filter(function(app) { return app.id !== currentAppId; });
+
+        if (otherApps.length === 0) {
+            empty.style.display = 'block';
+            return;
+        }
+
+        countEl.textContent = otherApps.length;
+
+        let html = '';
+        otherApps.forEach(function(app) {
+            const initial = app.applicant_name ? app.applicant_name[0] : '?';
+            html += '<div class="ss-api-item" data-app-id="' + app.id + '">';
+            html += '  <div class="ss-api-item-info">';
+            html += '    <div class="ss-api-item-avatar">' + escapeHtml(initial) + '</div>';
+            html += '    <div class="ss-api-item-details">';
+            html += '      <h4>' + escapeHtml(app.applicant_name) + '</h4>';
+            html += '      <p>' + escapeHtml(app.branch_name) + ' | ' + escapeHtml(app.step_name) + '</p>';
+            html += '      <span class="ss-api-step-badge">' + escapeHtml(app.current_step) + '</span>';
+            if (app.has_documents) {
+            html += '      <span style="margin-left:8px;font-size:0.75rem;color:var(--color-success);">已有 ' + app.document_count + ' 个文件</span>';
+            }
+            html += '    </div>';
+            html += '  </div>';
+            html += '  <div class="ss-api-item-actions">';
+            html += '    <button type="button" class="btn btn-sm btn-outline" onclick="uploadForSelfService(' + app.id + ', \'' + escapeHtml(app.current_step) + '\')">上传文件</button>';
+            html += '    <button type="button" class="btn btn-sm btn-success" onclick="confirmApiSelfService(' + app.id + ', \'' + escapeHtml(app.current_step) + '\')">确认完成</button>';
+            html += '  </div>';
+            html += '</div>';
+        });
+
+        content.innerHTML = html;
+    })
+    .catch(error => {
+        console.error('Load self-service applications error:', error);
+        loading.style.display = 'none';
+        errorEl.style.display = 'block';
+    });
+}
+
+/**
+ * 确认完成 API 加载的自助服务步骤
+ * @param {number} appId - 申请 ID
+ * @param {string} stepCode - 步骤代码
+ */
+function confirmApiSelfService(appId, stepCode) {
+    if (!confirm('确认要完成此步骤吗？完成后将自动推进到下一步。')) {
+        return;
+    }
+
+    fetch('/admin/api/self-service-step/' + appId, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            step_code: stepCode,
+            result: '管理员确认完成'
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('步骤已完成', 'success');
+            // 从列表中移除已完成的项目并更新计数
+            const item = document.querySelector('.ss-api-item[data-app-id="' + appId + '"]');
+            if (item) {
+                item.style.opacity = '0';
+                item.style.transition = 'opacity 0.3s';
+                setTimeout(function() {
+                    item.remove();
+                    // 更新计数
+                    const remaining = document.querySelectorAll('.ss-api-item').length;
+                    const countEl = document.getElementById('selfServiceCount');
+                    countEl.textContent = remaining;
+                    if (remaining === 0) {
+                        document.getElementById('selfServiceListContainer').style.display = 'none';
+                    }
+                }, 300);
+            }
+        } else {
+            alert('操作失败: ' + (data.error || '未知错误'));
+        }
+    })
+    .catch(error => {
+        console.error('Confirm step error:', error);
+        alert('操作失败，请检查网络连接后重试');
+    });
+}
+
+/**
+ * HTML 转义辅助函数，防止 XSS
+ * @param {string} text - 要转义的文本
+ * @returns {string} 转义后的安全文本
+ */
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.appendChild(document.createTextNode(text));
+    return div.innerHTML;
+}
+
+/**
+ * 显示简单的 Toast 提示
+ * @param {string} message - 提示消息
+ * @param {string} type - 提示类型 ('success' 或 'error')
+ */
+function showToast(message, type) {
+    // 复用页面中可能已有的 toast 机制，或创建临时提示
+    let toast = document.getElementById('toast-notification');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'toast-notification';
+        toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 24px;border-radius:8px;color:white;font-size:14px;z-index:9999;transition:opacity 0.3s;box-shadow:0 4px 12px rgba(0,0,0,0.15);';
+        document.body.appendChild(toast);
+    }
+
+    toast.textContent = message;
+    toast.style.background = type === 'success' ? '#2E7D32' : '#C62828';
+    toast.style.opacity = '1';
+
+    setTimeout(function() {
+        toast.style.opacity = '0';
+    }, 3000);
 }
 </script>
 {% endblock %}

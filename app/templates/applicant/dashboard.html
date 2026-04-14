@@ -366,6 +366,102 @@
     font-size: 0.9375rem;
 }
 
+/* 步骤角色指示器 - 书记步骤 */
+.step-item.role-secretary .step-icon {
+    background: var(--color-info, #3B82F6);
+    color: white;
+}
+
+.step-item.role-secretary.current .step-icon {
+    background: var(--color-info, #3B82F6);
+    animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.step-item.role-secretary .step-code {
+    color: var(--color-info, #3B82F6);
+}
+
+/* 步骤角色指示器 - 管理员步骤 */
+.step-item.role-admin .step-icon {
+    background: var(--color-warning, #F59E0B);
+    color: white;
+}
+
+.step-item.role-admin.current .step-icon {
+    background: var(--color-warning, #F59E0B);
+    animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.step-item.role-admin .step-code {
+    color: var(--color-warning, #F59E0B);
+}
+
+/* 等待状态提示标签 */
+.step-waiting-tag {
+    display: inline-block;
+    font-size: 0.7rem;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 6px;
+    vertical-align: middle;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+}
+
+.step-waiting-tag.secretary {
+    background: rgba(59, 130, 246, 0.12);
+    color: var(--color-info, #3B82F6);
+}
+
+.step-waiting-tag.admin {
+    background: rgba(245, 158, 11, 0.12);
+    color: var(--color-warning, #F59E0B);
+}
+
+/* 当前步骤模板下载区 */
+.step-templates {
+    margin-top: 4px;
+    margin-left: 26px;
+    padding: 6px 8px;
+    background: rgba(212, 175, 55, 0.06);
+    border-left: 2px solid var(--color-accent);
+    border-radius: 0 4px 4px 0;
+}
+
+.step-templates .template-label {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary, #666);
+    margin-bottom: 3px;
+}
+
+.step-templates .template-link {
+    display: inline-block;
+    font-size: 0.8rem;
+    color: var(--color-primary);
+    text-decoration: none;
+    margin-right: 10px;
+    padding: 1px 0;
+    border-bottom: 1px dashed var(--color-primary);
+    transition: opacity var(--transition-fast);
+}
+
+.step-templates .template-link:hover {
+    opacity: 0.7;
+}
+
+/* 待办等待状态样式 */
+.todo-item.waiting {
+    background: var(--color-bg-light, #F9FAFB);
+}
+
+.todo-item.waiting .todo-icon {
+    background: linear-gradient(135deg, var(--color-info, #3B82F6), #3058C8);
+}
+
+.todo-item.waiting-admin .todo-icon {
+    background: linear-gradient(135deg, var(--color-warning, #F59E0B), #C49000);
+}
+
 /* 响应式 */
 @media (max-width: 768px) {
     .dashboard-grid {
@@ -454,7 +550,13 @@
                     <div class="status-step">当前步骤：{{ current_step.code }} - {{ current_step.name }}</div>
                     <div class="status-badge">
                         <span class="badge-icon"></span>
+                        {% if current_step_submitter_role is defined and current_step_submitter_role == 'secretary' %}
+                        <span>等待书记处理</span>
+                        {% elif current_step_submitter_role is defined and current_step_submitter_role == 'admin' %}
+                        <span>等待党委处理</span>
+                        {% else %}
                         <span>{{ '待提交材料' if current_step.needs_document else '进行中' }}</span>
+                        {% endif %}
                     </div>
                     {% else %}
                     <div class="status-stage">准备开始</div>
@@ -483,11 +585,21 @@
                             <span class="phase-toggle">&#9660;</span>
                         </div>
                         <div class="phase-steps {% if not current_step or current_step.phase <= 1 %}show{% endif %}">
-                            <div class="step-item {% if completed_steps and 'L1' in completed_steps %}completed{% elif current_step and current_step.code == 'L1' %}current{% else %}pending{% endif %}">
-                                <span class="step-icon">{% if completed_steps and 'L1' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L1' %}&#9679;{% else %}&#9675;{% endif %}</span>
+                            {% set sr = step_roles.get('L1', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L1' in completed_steps %}completed{% elif current_step and current_step.code == 'L1' %}current{% elif sr.submitter_role == 'secretary' %}role-secretary{% elif sr.submitter_role == 'admin' %}role-admin{% else %}pending{% endif %}{% if current_step and current_step.code != 'L1' and sr.submitter_role == 'secretary' %} role-secretary{% elif current_step and current_step.code != 'L1' and sr.submitter_role == 'admin' %} role-admin{% endif %}">
+                                <span class="step-icon">{% if completed_steps and 'L1' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L1' %}&#9679;{% elif sr.submitter_role == 'secretary' %}&#9679;{% elif sr.submitter_role == 'admin' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L1</span>
                                 <span class="step-name">递交入党申请书</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L1' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L1' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
+                            {% if current_step and current_step.code == 'L1' and sr.submitter_role == 'applicant' and current_step_templates is defined and current_step_templates|length > 0 %}
+                            <div class="step-templates">
+                                <div class="template-label">可用模板：</div>
+                                {% for tpl in current_step_templates %}
+                                <a href="{{ url_for('applicant.download_template', id=tpl.id) }}" class="template-link">{{ tpl.name }}</a>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
                         </div>
                     </div>
 
@@ -499,30 +611,40 @@
                             <span class="phase-toggle">&#9660;</span>
                         </div>
                         <div class="phase-steps {% if current_step and current_step.phase == 2 %}show{% endif %}">
-                            <div class="step-item {% if completed_steps and 'L2' in completed_steps %}completed{% elif current_step and current_step.code == 'L2' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L2', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L2' in completed_steps %}completed{% elif current_step and current_step.code == 'L2' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L2' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L2' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L2</span>
                                 <span class="step-name">党组织派人谈话</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L2' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L2' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L3' in completed_steps %}completed{% elif current_step and current_step.code == 'L3' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L3', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L3' in completed_steps %}completed{% elif current_step and current_step.code == 'L3' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L3' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L3' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L3</span>
                                 <span class="step-name">支委会研究</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L3' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L3' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L4' in completed_steps %}completed{% elif current_step and current_step.code == 'L4' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L4', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L4' in completed_steps %}completed{% elif current_step and current_step.code == 'L4' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L4' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L4' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L4</span>
                                 <span class="step-name">上级党委备案</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L4' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L4' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L5' in completed_steps %}completed{% elif current_step and current_step.code == 'L5' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L5', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L5' in completed_steps %}completed{% elif current_step and current_step.code == 'L5' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L5' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L5' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L5</span>
                                 <span class="step-name">指定培养联系人</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L5' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L5' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L6' in completed_steps %}completed{% elif current_step and current_step.code == 'L6' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L6', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L6' in completed_steps %}completed{% elif current_step and current_step.code == 'L6' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L6' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L6' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L6</span>
                                 <span class="step-name">确定入党积极分子</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L6' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L6' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
                         </div>
                     </div>
@@ -535,41 +657,71 @@
                             <span class="phase-toggle">&#9660;</span>
                         </div>
                         <div class="phase-steps {% if current_step and current_step.phase == 3 %}show{% endif %}">
-                            <div class="step-item {% if completed_steps and 'L7' in completed_steps %}completed{% elif current_step and current_step.code == 'L7' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L7', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L7' in completed_steps %}completed{% elif current_step and current_step.code == 'L7' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L7' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L7' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L7</span>
                                 <span class="step-name">一年以上培养教育考察</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L7' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L7' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L8' in completed_steps %}completed{% elif current_step and current_step.code == 'L8' %}current{% else %}pending{% endif %}">
+                            {% if current_step and current_step.code == 'L7' and sr.submitter_role == 'applicant' and current_step_templates is defined and current_step_templates|length > 0 %}
+                            <div class="step-templates">
+                                <div class="template-label">可用模板：</div>
+                                {% for tpl in current_step_templates %}
+                                <a href="{{ url_for('applicant.download_template', id=tpl.id) }}" class="template-link">{{ tpl.name }}</a>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                            {% set sr = step_roles.get('L8', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L8' in completed_steps %}completed{% elif current_step and current_step.code == 'L8' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L8' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L8' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L8</span>
                                 <span class="step-name">听取党内外群众意见</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L8' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L8' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L9' in completed_steps %}completed{% elif current_step and current_step.code == 'L9' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L9', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L9' in completed_steps %}completed{% elif current_step and current_step.code == 'L9' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L9' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L9' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L9</span>
                                 <span class="step-name">支委会讨论同意</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L9' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L9' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L10' in completed_steps %}completed{% elif current_step and current_step.code == 'L10' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L10', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L10' in completed_steps %}completed{% elif current_step and current_step.code == 'L10' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L10' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L10' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L10</span>
                                 <span class="step-name">上级党委备案</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L10' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L10' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L11' in completed_steps %}completed{% elif current_step and current_step.code == 'L11' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L11', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L11' in completed_steps %}completed{% elif current_step and current_step.code == 'L11' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L11' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L11' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L11</span>
                                 <span class="step-name">确定入党介绍人</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L11' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L11' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L12' in completed_steps %}completed{% elif current_step and current_step.code == 'L12' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L12', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L12' in completed_steps %}completed{% elif current_step and current_step.code == 'L12' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L12' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L12' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L12</span>
                                 <span class="step-name">政治审查</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L12' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L12' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L13' in completed_steps %}completed{% elif current_step and current_step.code == 'L13' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L13', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L13' in completed_steps %}completed{% elif current_step and current_step.code == 'L13' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L13' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L13' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L13</span>
                                 <span class="step-name">短期集中培训</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L13' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L13' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
+                            {% if current_step and current_step.code == 'L13' and sr.submitter_role == 'applicant' and current_step_templates is defined and current_step_templates|length > 0 %}
+                            <div class="step-templates">
+                                <div class="template-label">可用模板：</div>
+                                {% for tpl in current_step_templates %}
+                                <a href="{{ url_for('applicant.download_template', id=tpl.id) }}" class="template-link">{{ tpl.name }}</a>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
                         </div>
                     </div>
 
@@ -581,40 +733,54 @@
                             <span class="phase-toggle">&#9660;</span>
                         </div>
                         <div class="phase-steps {% if current_step and current_step.phase == 4 %}show{% endif %}">
-                            <div class="step-item {% if completed_steps and 'L14' in completed_steps %}completed{% elif current_step and current_step.code == 'L14' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L14', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L14' in completed_steps %}completed{% elif current_step and current_step.code == 'L14' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L14' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L14' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L14</span>
                                 <span class="step-name">支部委员会审查</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L14' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L14' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L15' in completed_steps %}completed{% elif current_step and current_step.code == 'L15' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L15', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L15' in completed_steps %}completed{% elif current_step and current_step.code == 'L15' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L15' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L15' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L15</span>
                                 <span class="step-name">上级党委预审</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L15' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L15' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L16' in completed_steps %}completed{% elif current_step and current_step.code == 'L16' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L16', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L16' in completed_steps %}completed{% elif current_step and current_step.code == 'L16' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L16' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L16' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L16</span>
                                 <span class="step-name">填写入党志愿书</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L16' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L16' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L17' in completed_steps %}completed{% elif current_step and current_step.code == 'L17' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L17', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L17' in completed_steps %}completed{% elif current_step and current_step.code == 'L17' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L17' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L17' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L17</span>
                                 <span class="step-name">支部大会讨论</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L17' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L17' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L18' in completed_steps %}completed{% elif current_step and current_step.code == 'L18' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L18', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L18' in completed_steps %}completed{% elif current_step and current_step.code == 'L18' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L18' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L18' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L18</span>
                                 <span class="step-name">上级党委派人谈话</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L18' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L18' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L19' in completed_steps %}completed{% elif current_step and current_step.code == 'L19' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L19', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L19' in completed_steps %}completed{% elif current_step and current_step.code == 'L19' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L19' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L19' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L19</span>
                                 <span class="step-name">上级党委审批</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L19' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L19' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L20' in completed_steps %}completed{% elif current_step and current_step.code == 'L20' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L20', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L20' in completed_steps %}completed{% elif current_step and current_step.code == 'L20' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L20' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L20' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L20</span>
                                 <span class="step-name">预备党员入党宣誓</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L20' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L20' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
                         </div>
                     </div>
@@ -627,35 +793,55 @@
                             <span class="phase-toggle">&#9660;</span>
                         </div>
                         <div class="phase-steps {% if current_step and current_step.phase == 5 %}show{% endif %}">
-                            <div class="step-item {% if completed_steps and 'L21' in completed_steps %}completed{% elif current_step and current_step.code == 'L21' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L21', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L21' in completed_steps %}completed{% elif current_step and current_step.code == 'L21' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L21' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L21' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L21</span>
                                 <span class="step-name">一年预备期教育考察</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L21' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L21' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L22' in completed_steps %}completed{% elif current_step and current_step.code == 'L22' %}current{% else %}pending{% endif %}">
+                            {% if current_step and current_step.code == 'L21' and sr.submitter_role == 'applicant' and current_step_templates is defined and current_step_templates|length > 0 %}
+                            <div class="step-templates">
+                                <div class="template-label">可用模板：</div>
+                                {% for tpl in current_step_templates %}
+                                <a href="{{ url_for('applicant.download_template', id=tpl.id) }}" class="template-link">{{ tpl.name }}</a>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                            {% set sr = step_roles.get('L22', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L22' in completed_steps %}completed{% elif current_step and current_step.code == 'L22' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L22' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L22' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L22</span>
                                 <span class="step-name">提出转正申请</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L22' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L22' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L23' in completed_steps %}completed{% elif current_step and current_step.code == 'L23' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L23', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L23' in completed_steps %}completed{% elif current_step and current_step.code == 'L23' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L23' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L23' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L23</span>
                                 <span class="step-name">党内外群众意见</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L23' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L23' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L24' in completed_steps %}completed{% elif current_step and current_step.code == 'L24' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L24', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L24' in completed_steps %}completed{% elif current_step and current_step.code == 'L24' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L24' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L24' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L24</span>
                                 <span class="step-name">支委会审查</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L24' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L24' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L25' in completed_steps %}completed{% elif current_step and current_step.code == 'L25' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L25', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L25' in completed_steps %}completed{% elif current_step and current_step.code == 'L25' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L25' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L25' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L25</span>
                                 <span class="step-name">支部大会讨论</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L25' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L25' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
-                            <div class="step-item {% if completed_steps and 'L26' in completed_steps %}completed{% elif current_step and current_step.code == 'L26' %}current{% else %}pending{% endif %}">
+                            {% set sr = step_roles.get('L26', {}) if step_roles is defined else {} %}
+                            <div class="step-item {% if completed_steps and 'L26' in completed_steps %}completed{% elif current_step and current_step.code == 'L26' %}current{% else %}pending{% endif %}{% if sr.submitter_role == 'secretary' %} role-secretary{% elif sr.submitter_role == 'admin' %} role-admin{% endif %}">
                                 <span class="step-icon">{% if completed_steps and 'L26' in completed_steps %}&#10003;{% elif current_step and current_step.code == 'L26' %}&#9679;{% else %}&#9675;{% endif %}</span>
                                 <span class="step-code">L26</span>
                                 <span class="step-name">上级党委审批</span>
+                                {% if sr.submitter_role == 'secretary' and not (completed_steps and 'L26' in completed_steps) %}<span class="step-waiting-tag secretary">书记处理</span>{% elif sr.submitter_role == 'admin' and not (completed_steps and 'L26' in completed_steps) %}<span class="step-waiting-tag admin">党委处理</span>{% endif %}
                             </div>
                         </div>
                     </div>
@@ -675,10 +861,11 @@
                 {% if todos and todos|length > 0 %}
                 <ul class="todo-list">
                     {% for todo in todos %}
-                    <li class="todo-item">
+                    <li class="todo-item{% if todo.waiting_for == 'secretary' %} waiting{% elif todo.waiting_for == 'admin' %} waiting-admin{% endif %}">
                         <div class="todo-icon {{ todo.priority }}">
                             {% if todo.priority == 'urgent' %}&#33;
                             {% elif todo.priority == 'normal' %}&#9888;
+                            {% elif todo.waiting_for == 'admin' %}&#9737;
                             {% else %}&#8505;
                             {% endif %}
                         </div>

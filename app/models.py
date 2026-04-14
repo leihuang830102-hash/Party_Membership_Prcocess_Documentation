@@ -86,6 +86,18 @@ class StepDefinition(db.Model):
     order_num = db.Column(db.Integer, nullable=False)
     required_templates = db.Column(db.Text)  # JSON string of template IDs
 
+    # 步骤级别工作流控制字段
+    # submitter_role: 哪种角色可以提交/执行该步骤
+    #   - 'applicant': 申请人提交（需两级审批：书记 -> 管理员）
+    #   - 'secretary': 书记提交（需一级审批：管理员）
+    #   - 'admin': 管理员直接操作（无需审批）
+    submitter_role = db.Column(db.String(20), default='applicant')
+    # approval_type: 该步骤的审批类型
+    #   - 'two_level': 两级审批（书记审批 -> 管理员审批）
+    #   - 'one_level': 一级审批（管理员审批）
+    #   - 'none': 无需审批（管理员直接操作完成）
+    approval_type = db.Column(db.String(20), default='two_level')
+
     def __repr__(self):
         return f'<StepDefinition {self.step_code}: {self.name}>'
 
@@ -128,7 +140,7 @@ class StepRecord(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     application_id = db.Column(db.Integer, db.ForeignKey('applications.id'), nullable=False)
     step_code = db.Column(db.String(10), nullable=False)
-    status = db.Column(db.String(20), default='pending')  # pending, completed, failed
+    status = db.Column(db.String(20), default='pending')  # pending, completed, failed, secretary_approved
     result = db.Column(db.Text)
     completed_at = db.Column(db.DateTime)
     completed_by = db.Column(db.Integer, db.ForeignKey('users.id'))
@@ -156,10 +168,13 @@ class Document(db.Model):
     uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'))
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # Document review fields - track two-level approval/rejection:
-    # Status flow: pending -> secretary_approved -> admin_approved (final)
-    #                         -> secretary_rejected (applicant can delete & resubmit)
-    #              secretary_approved -> admin_rejected (secretary can delete & resubmit)
+    # Document review fields - track approval/rejection:
+    # Two-level flow (submitter_role='applicant'): pending -> secretary_approved -> admin_approved (final)
+    #                                                pending -> secretary_rejected (applicant can delete & resubmit)
+    #                                                secretary_approved -> admin_rejected (secretary can delete & resubmit)
+    # One-level flow (submitter_role='secretary'):  pending -> admin_approved (final)
+    #                                                pending -> admin_rejected (secretary can delete & resubmit)
+    # None flow (submitter_role='admin'):           管理员直接操作，无需文档审批
     review_status = db.Column(db.String(25), default='pending')
     # Valid values: pending, secretary_approved, secretary_rejected,
     #               admin_approved, admin_rejected

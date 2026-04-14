@@ -12,7 +12,7 @@ from werkzeug.security import generate_password_hash
 from werkzeug.utils import secure_filename
 from sqlalchemy import func
 from app import db
-from app.models import User, Branch, Template, Application, StepRecord, StepDefinition, Document
+from app.models import User, Branch, Template, Application, StepRecord, StepDefinition, Document, Notification
 
 # China Standard Time (UTC+8) - used for consistent timestamp display
 CHINA_TZ = timezone(timedelta(hours=8))
@@ -60,9 +60,18 @@ def dashboard():
     # Total users count
     total_users = User.query.count()
 
-    # Count documents pending admin review (secretary has already approved)
+    # Count documents pending admin review:
+    # - secretary_approved: two_level steps waiting for final admin approval
+    # - pending for one_level steps: secretary-submitted docs waiting for admin review
+    one_level_step_codes = [sd.step_code for sd in StepDefinition.query.filter_by(approval_type='one_level').all()]
     pending_doc_count = Document.query.filter(
-        Document.review_status == 'secretary_approved'
+        db.or_(
+            Document.review_status == 'secretary_approved',
+            db.and_(
+                Document.review_status == 'pending',
+                Document.step_code.in_(one_level_step_codes)
+            ) if one_level_step_codes else False
+        )
     ).count()
 
     # Count applications by current_stage (only in_progress ones)
@@ -105,10 +114,24 @@ def dashboard():
             'todo_label': '申请审批',
         })
 
-    # Query documents awaiting admin review (secretary_approved status)
-    pending_documents = Document.query.filter(
+    # Query documents awaiting admin review:
+    # - secretary_approved: two_level steps (waiting for final admin approval)
+    # - pending + one_level steps: secretary-submitted docs (admin is sole approver)
+    pending_documents_two_level = Document.query.filter(
         Document.review_status == 'secretary_approved'
     ).order_by(Document.reviewed_at.desc()).limit(10).all()
+
+    # One-level steps: find pending documents where the step's approval_type is 'one_level'
+    one_level_step_codes = [sd.step_code for sd in StepDefinition.query.filter_by(approval_type='one_level').all()]
+    pending_documents_one_level = []
+    if one_level_step_codes:
+        pending_documents_one_level = Document.query.filter(
+            Document.review_status == 'pending',
+            Document.step_code.in_(one_level_step_codes)
+        ).order_by(Document.uploaded_at.desc()).limit(10).all()
+
+    # Combine both lists
+    pending_documents = list(pending_documents_two_level) + pending_documents_one_level
 
     # Build document review items and add them to the recent_apps_data list
     for doc in pending_documents:
@@ -116,22 +139,32 @@ def dashboard():
         applicant_name = applicant.name if applicant else '未知'
         branch_name = doc.application.branch.name if doc.application and doc.application.branch else 'N/A'
 
-        # Resolve step definition name
+        # Resolve step definition name and approval type
         step_def = StepDefinition.query.filter_by(step_code=doc.step_code).first()
         step_name = step_def.name if step_def else (doc.step_code or '')
+        approval_type = step_def.approval_type if step_def else 'two_level'
+
+        # Determine review status label and todo type based on approval type
+        if approval_type == 'one_level':
+            review_label = '一级审批待审'
+            todo_label = '一级审批待审'
+        else:
+            review_label = '待审核文档'
+            todo_label = '待审核文档'
 
         recent_apps_data.append({
             'id': doc.application.id if doc.application else 0,
             'doc_id': doc.id,
             'user_name': applicant_name,
             'branch_name': branch_name,
-            'status': 'secretary_approved',
+            'status': doc.review_status,
             'current_step': step_name,
             'created_at': cn_time_str(doc.reviewed_at) or cn_time_str(doc.uploaded_at) or '',
             'todo_type': 'document_review',
-            'todo_label': '待审核文档',
+            'todo_label': todo_label,
             'doc_name': doc.original_filename or doc.filename,
             'stage': f'第{doc.application.current_stage}阶段' if doc.application else '',
+            'approval_type': approval_type,
         })
 
     # Sort combined list by created_at descending
@@ -1032,8 +1065,15 @@ def api_delete_document(doc_id):
 def api_review_document(doc_id):
     """
     Review a document (approve or reject) as admin.
-    Updates the Document's review_status, reviewed_by, reviewed_at, review_comment,
-    and also updates the linked StepRecord if the document has a step_code.
+    Supports THREE distinct flows based on step_def.approval_type:
+
+    - two_level: Only reviews docs at secretary_approved status (final approval after secretary)
+                 Approve -> admin_approved, mark step completed, advance.
+                 Reject  -> admin_rejected, secretary can resubmit.
+    - one_level: Reviews docs at pending status (secretary-submitted, admin is sole approver)
+                 Approve -> admin_approved, mark step completed, advance.
+                 Reject  -> admin_rejected, secretary can resubmit.
+    - none:      Not handled here (admin self-service endpoint instead).
 
     Request body:
     - action: 'approve' or 'reject'
@@ -1051,15 +1091,42 @@ def api_review_document(doc_id):
     if action not in ['approve', 'reject']:
         return jsonify({'success': False, 'message': '无效的操作类型'}), 400
 
-    # Update Document's own review status using two-level status values.
-    # Admin approve: secretary_approved -> admin_approved (final approval)
-    # Admin reject: secretary_approved -> admin_rejected (secretary can delete & resubmit)
+    # 查找对应的步骤定义以确定审批类型
+    step_def = None
+    if document.step_code:
+        step_def = StepDefinition.query.filter_by(step_code=document.step_code).first()
+
+    # 根据 approval_type 确定期望的文档状态和审批逻辑
+    approval_type = step_def.approval_type if step_def else 'two_level'
+
+    if approval_type == 'two_level':
+        # 两级审批：管理员审核已通过书记审批的文档
+        if document.review_status != 'secretary_approved':
+            return jsonify({
+                'success': False,
+                'message': f'两级审批步骤的文档需先通过书记审核（当前状态: {document.review_status}）'
+            }), 400
+    elif approval_type == 'one_level':
+        # 一级审批：管理员直接审核书记提交的文档（pending状态）
+        if document.review_status != 'pending':
+            return jsonify({
+                'success': False,
+                'message': f'一级审批步骤的文档状态不正确（当前状态: {document.review_status}，需为 pending）'
+            }), 400
+    else:
+        # none 类型不应通过此接口审批
+        return jsonify({
+            'success': False,
+            'message': '无需审批的步骤请使用自助服务接口操作'
+        }), 400
+
+    # 更新文档审核状态
     document.review_status = 'admin_approved' if action == 'approve' else 'admin_rejected'
     document.reviewed_by = current_user.id
     document.reviewed_at = datetime.utcnow()
     document.review_comment = comment if comment else None
 
-    # If document is linked to a step, also update the step record
+    # 如果文档关联了某个步骤，同步更新步骤记录
     if document.step_code:
         step_record = StepRecord.query.filter_by(
             application_id=application.id,
@@ -1071,15 +1138,14 @@ def api_review_document(doc_id):
                 step_record.status = 'failed'
                 step_record.result = f'文档审核不通过: {comment}' if comment else '文档审核不通过'
             else:
-                # Mark step as completed on approval
+                # 审核通过：标记步骤完成
                 step_record.status = 'completed'
                 step_record.result = f'文档审核通过: {comment}' if comment else '文档审核通过'
                 step_record.completed_at = datetime.utcnow()
                 step_record.completed_by = current_user.id
 
-                # Advance application to next step if this was the current step
+                # 如果该步骤是申请的当前步骤，则推进到下一步
                 if application.current_step == document.step_code:
-                    step_def = StepDefinition.query.filter_by(step_code=document.step_code).first()
                     if step_def:
                         next_step = StepDefinition.query.filter(
                             StepDefinition.order_num > step_def.order_num
@@ -1099,4 +1165,345 @@ def api_review_document(doc_id):
             'document_id': doc_id,
             'review_status': document.review_status
         }
+    })
+
+
+# ==================== Self-Service Step API (none-type steps) ====================
+# 对于 approval_type='none' 的步骤（如 L12, L15-L17, L25, L26），
+# 管理员直接操作完成，无需文档审批流程。
+
+@admin_bp.route('/api/self-service-step/<int:app_id>', methods=['POST'])
+@admin_required
+def api_self_service_step(app_id):
+    """
+    管理员自助完成无需审批的步骤（approval_type='none'）。
+
+    用于管理员直接操作完成的步骤，如 L12（上级党委预审）等。
+    可选附带文件上传（multipart form）或仅确认完成（JSON）。
+
+    JSON body:
+    - step_code: 要完成的步骤代码（如 'L12'）
+    - result: 可选的备注说明
+
+    Multipart form:
+    - step_code: 要完成的步骤代码
+    - result: 可选备注
+    - file: 可选的文件上传
+    - doc_type: 文件类型（如 'general'）
+    """
+    application = Application.query.get_or_404(app_id)
+
+    # 支持两种请求格式：JSON 或 multipart form
+    if request.is_json:
+        data = request.get_json()
+        step_code = data.get('step_code', '').strip()
+        result_text = data.get('result', '').strip()
+    else:
+        step_code = request.form.get('step_code', '').strip()
+        result_text = request.form.get('result', '').strip()
+
+    if not step_code:
+        return jsonify({'success': False, 'error': '缺少步骤代码'}), 400
+
+    # 验证：步骤定义必须存在且 approval_type 为 'none'
+    step_def = StepDefinition.query.filter_by(step_code=step_code).first()
+    if not step_def:
+        return jsonify({'success': False, 'error': f'步骤 {step_code} 不存在'}), 400
+
+    if step_def.approval_type != 'none':
+        return jsonify({
+            'success': False,
+            'error': f'步骤 {step_code} 不是自助服务步骤（approval_type={step_def.approval_type}）'
+        }), 400
+
+    # 验证：只能完成当前步骤（顺序执行）
+    if application.current_step != step_code:
+        return jsonify({
+            'success': False,
+            'error': f'只能操作当前步骤（当前步骤: {application.current_step}，请求步骤: {step_code}）'
+        }), 400
+
+    # 处理可选的文件上传（multipart form 中包含 file 字段时）
+    uploaded_doc = None
+    if 'file' in request.files:
+        file = request.files['file']
+        if file and file.filename:
+            # 检查文件扩展名
+            doc_allowed_ext = {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'jpeg', 'png'}
+            ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+            if ext not in doc_allowed_ext:
+                return jsonify({
+                    'success': False,
+                    'error': '不支持的文件类型，请上传 PDF、Word、Excel 或图片文件'
+                }), 400
+
+            # 生成安全的文件名（与 applicant.py 上传逻辑一致）
+            doc_type = request.form.get('doc_type', 'general')
+            original_filename = file.filename
+            safe_name = secure_filename(file.filename)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            unique_filename = f"{current_user.id}_{timestamp}_{safe_name}"
+
+            # 确保上传目录存在
+            upload_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'documents')
+            os.makedirs(upload_dir, exist_ok=True)
+
+            file_path = os.path.join(upload_dir, unique_filename)
+            file.save(file_path)
+            file_size = os.path.getsize(file_path)
+
+            # 创建文档记录（管理员自助上传直接标记为 admin_approved）
+            uploaded_doc = Document(
+                application_id=application.id,
+                step_code=step_code,
+                doc_type=doc_type,
+                filename=unique_filename,
+                original_filename=original_filename,
+                file_path=file_path,
+                file_size=file_size,
+                uploaded_by=current_user.id,
+                review_status='admin_approved'  # 自助上传自动通过
+            )
+            db.session.add(uploaded_doc)
+
+    # 查找或创建步骤记录
+    step_record = StepRecord.query.filter_by(
+        application_id=application.id,
+        step_code=step_code
+    ).first()
+
+    if not step_record:
+        step_record = StepRecord(
+            application_id=application.id,
+            step_code=step_code,
+            status='pending'
+        )
+        db.session.add(step_record)
+
+    # 标记步骤完成
+    step_record.status = 'completed'
+    step_record.result = result_text if result_text else '管理员自助完成'
+    step_record.completed_at = datetime.utcnow()
+    step_record.completed_by = current_user.id
+
+    # 推进到下一步
+    next_step = StepDefinition.query.filter(
+        StepDefinition.order_num > step_def.order_num
+    ).order_by(StepDefinition.order_num).first()
+
+    next_step_info = None
+    if next_step:
+        application.current_step = next_step.step_code
+        application.current_stage = next_step.stage
+        next_step_info = {
+            'step_code': next_step.step_code,
+            'step_name': next_step.name,
+            'stage': next_step.stage
+        }
+    else:
+        application.status = 'completed'
+
+    # 创建通知给申请人
+    notification = Notification(
+        user_id=application.user_id,
+        title=f'步骤已完成: {step_def.name}',
+        content=f'管理员已确认完成步骤「{step_def.name}」' +
+                (f'，备注: {result_text}' if result_text else ''),
+        link=f'/applicant/applications/{application.id}',
+        is_read=False
+    )
+    db.session.add(notification)
+
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'message': f'步骤「{step_def.name}」已完成',
+        'data': {
+            'step_code': step_code,
+            'step_name': step_def.name,
+            'status': 'completed',
+            'next_step': next_step_info,
+            'document': {
+                'id': uploaded_doc.id,
+                'filename': uploaded_doc.original_filename
+            } if uploaded_doc else None
+        }
+    })
+
+
+@admin_bp.route('/api/self-service-step/<int:app_id>/upload', methods=['POST'])
+@admin_required
+def api_self_service_step_upload(app_id):
+    """
+    管理员自助上传文档（不推进步骤）。
+
+    用于 none 类型步骤的文件上传，上传后文档自动标记为 admin_approved。
+    管理员上传文件后仍需通过 self-service-step 接口确认完成步骤。
+
+    Multipart form:
+    - file: 上传的文件（必需）
+    - step_code: 步骤代码（必需）
+    - doc_type: 文件类型（可选，默认 'general'）
+    """
+    application = Application.query.get_or_404(app_id)
+
+    # 验证文件上传
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': '未上传文件'}), 400
+
+    file = request.files['file']
+    if not file or file.filename == '':
+        return jsonify({'success': False, 'error': '未选择文件'}), 400
+
+    # 获取表单参数
+    step_code = request.form.get('step_code', '').strip()
+    doc_type = request.form.get('doc_type', 'general')
+
+    if not step_code:
+        return jsonify({'success': False, 'error': '缺少步骤代码'}), 400
+
+    # 验证步骤定义
+    step_def = StepDefinition.query.filter_by(step_code=step_code).first()
+    if not step_def:
+        return jsonify({'success': False, 'error': f'步骤 {step_code} 不存在'}), 400
+
+    if step_def.approval_type != 'none':
+        return jsonify({
+            'success': False,
+            'error': f'步骤 {step_code} 不是自助服务步骤'
+        }), 400
+
+    # 验证文件扩展名
+    doc_allowed_ext = {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'jpeg', 'png'}
+    ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+    if ext not in doc_allowed_ext:
+        return jsonify({
+            'success': False,
+            'error': '不支持的文件类型，请上传 PDF、Word、Excel 或图片文件'
+        }), 400
+
+    # 生成安全的文件名
+    original_filename = file.filename
+    safe_name = secure_filename(file.filename)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    unique_filename = f"{current_user.id}_{timestamp}_{safe_name}"
+
+    # 确保上传目录存在
+    upload_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'documents')
+    os.makedirs(upload_dir, exist_ok=True)
+
+    file_path = os.path.join(upload_dir, unique_filename)
+
+    try:
+        file.save(file_path)
+        file_size = os.path.getsize(file_path)
+
+        # 创建文档记录（自助上传自动标记为 admin_approved）
+        document = Document(
+            application_id=application.id,
+            step_code=step_code,
+            doc_type=doc_type,
+            filename=unique_filename,
+            original_filename=original_filename,
+            file_path=file_path,
+            file_size=file_size,
+            uploaded_by=current_user.id,
+            review_status='admin_approved'  # 自助上传自动通过
+        )
+        db.session.add(document)
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': '文件上传成功',
+            'data': {
+                'id': document.id,
+                'filename': original_filename,
+                'file_size': file_size,
+                'step_code': step_code,
+                'review_status': document.review_status
+            }
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': f'文件上传失败: {str(e)}'
+        }), 500
+
+
+@admin_bp.route('/api/self-service-applications', methods=['GET'])
+@admin_required
+def api_self_service_applications():
+    """
+    获取当前处于管理员自助服务步骤的申请列表。
+
+    返回所有当前步骤为 approval_type='none' 的进行中申请，
+    即需要管理员直接操作的步骤（如 L12, L15-L17, L25, L26）。
+
+    可选过滤参数:
+    - step_code: 按步骤代码过滤
+    - branch_id: 按支部过滤
+    """
+    # 查找所有 approval_type='none' 的步骤代码
+    none_step_defs = StepDefinition.query.filter_by(approval_type='none').all()
+    none_step_codes = [sd.step_code for sd in none_step_defs]
+
+    if not none_step_codes:
+        return jsonify({'applications': []})
+
+    # 构建步骤定义的映射，方便后续查找步骤名称
+    step_def_map = {sd.step_code: sd for sd in none_step_defs}
+
+    # 查询当前步骤为 none 类型的进行中申请
+    query = Application.query.filter(
+        Application.status == 'in_progress',
+        Application.current_step.in_(none_step_codes)
+    )
+
+    # 可选过滤
+    step_code_filter = request.args.get('step_code', '').strip()
+    if step_code_filter:
+        if step_code_filter not in none_step_codes:
+            return jsonify({'applications': []})
+        query = query.filter(Application.current_step == step_code_filter)
+
+    branch_id = request.args.get('branch_id', type=int)
+    if branch_id:
+        query = query.filter(Application.branch_id == branch_id)
+
+    applications = query.order_by(Application.updated_at.desc()).all()
+
+    # 构建返回数据
+    apps_data = []
+    for app in applications:
+        step_def = step_def_map.get(app.current_step)
+        applicant = app.user
+        branch = app.branch
+
+        # 查找该步骤下是否已有上传的文档
+        existing_docs = Document.query.filter_by(
+            application_id=app.id,
+            step_code=app.current_step
+        ).all()
+
+        apps_data.append({
+            'id': app.id,
+            'applicant_name': applicant.name if applicant else '未知',
+            'applicant_id': applicant.id if applicant else None,
+            'current_step': app.current_step,
+            'step_name': step_def.name if step_def else app.current_step,
+            'branch_name': branch.name if branch else 'N/A',
+            'branch_id': app.branch_id,
+            'stage': app.current_stage,
+            'has_documents': len(existing_docs) > 0,
+            'document_count': len(existing_docs),
+            'updated_at': cn_time_str(app.updated_at, '%Y-%m-%d %H:%M:%S')
+        })
+
+    return jsonify({
+        'applications': apps_data,
+        'total': len(apps_data)
     })

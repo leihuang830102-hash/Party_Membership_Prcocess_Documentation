@@ -13,6 +13,21 @@ from werkzeug.utils import secure_filename
 from app import db
 from app.models import Application, StepDefinition, StepRecord, Document, Template, User
 
+# 工作流辅助函数 - 提供步骤权限判断、审批状态文本等功能
+# Workflow helpers - provide step permission checks, approval status text, etc.
+try:
+    from app.workflow_helpers import (
+        can_submit, get_allowed_actions, get_step_config,
+        get_step_templates, get_approval_status_text
+    )
+except ImportError:
+    # 如果 workflow_helpers 不可用，定义降级函数
+    can_submit = None
+    get_allowed_actions = None
+    get_step_config = None
+    get_step_templates = None
+    get_approval_status_text = None
+
 # China Standard Time (UTC+8) - used for consistent timestamp display
 CHINA_TZ = timezone(timedelta(hours=8))
 
@@ -94,6 +109,10 @@ def dashboard():
     todos = []
     contact_person = None
     has_application = application is not None
+    step_roles = {}  # Maps step_code -> {'submitter_role': ..., 'action_label': ...}
+    current_step_submitter_role = 'applicant'  # Default for backward compatibility
+    current_step_action_label = '你的操作'
+    current_step_templates = []
 
     if application:
         # Get current step definition
@@ -109,6 +128,50 @@ def dashboard():
                 'phase_name': get_phase_name(current_step_def.stage),
                 'needs_document': True  # Default to True for simplicity
             }
+            # Determine submitter_role and action_label for the current step
+            current_step_submitter_role = getattr(current_step_def, 'submitter_role', 'applicant')
+            if current_step_submitter_role == 'applicant':
+                current_step_action_label = '你的操作'
+            elif current_step_submitter_role == 'secretary':
+                current_step_action_label = '等待书记操作'
+            elif current_step_submitter_role == 'admin':
+                current_step_action_label = '等待党委操作'
+            else:
+                current_step_action_label = '等待处理'
+
+        # Build step_roles mapping for ALL steps so the timeline can use it
+        all_step_defs = StepDefinition.query.order_by(
+            StepDefinition.stage, StepDefinition.order_num
+        ).all()
+        for sd in all_step_defs:
+            role = getattr(sd, 'submitter_role', 'applicant')
+            if role == 'applicant':
+                label = '你的操作'
+            elif role == 'secretary':
+                label = '等待书记操作'
+            elif role == 'admin':
+                label = '等待党委操作'
+            else:
+                label = '等待处理'
+            step_roles[sd.step_code] = {
+                'submitter_role': role,
+                'action_label': label
+            }
+
+        # Get templates for the current step (only relevant for applicant steps)
+        if current_step_def and current_step_submitter_role == 'applicant':
+            templates_for_step = Template.query.filter(
+                db.or_(
+                    Template.step_code == application.current_step,
+                    Template.step_code.is_(None)
+                ),
+                Template.is_active == True
+            ).all()
+            current_step_templates = [{
+                'id': t.id,
+                'name': t.name,
+                'description': t.description
+            } for t in templates_for_step]
 
         # Get completed steps
         step_records = StepRecord.query.filter_by(
@@ -166,7 +229,11 @@ def dashboard():
                          failed_step=failed_step,
                          todos=todos,
                          contact_person=contact_person,
-                         has_application=has_application)
+                         has_application=has_application,
+                         step_roles=step_roles,
+                         current_step_submitter_role=current_step_submitter_role,
+                         current_step_action_label=current_step_action_label,
+                         current_step_templates=current_step_templates)
 
 
 @applicant_bp.route('/progress')
@@ -200,12 +267,27 @@ def progress():
                 'name': get_stage_name(step.stage),
                 'steps': []
             }
+
+        # 根据步骤的 submitter_role 确定面向申请人的操作标签
+        # Determine action label for applicant based on step's submitter_role
+        submitter_role = getattr(step, 'submitter_role', 'applicant')
+        if submitter_role == 'applicant':
+            action_label = '你的操作'
+        elif submitter_role == 'secretary':
+            action_label = '等待书记操作'
+        elif submitter_role == 'admin':
+            action_label = '等待党委操作'
+        else:
+            action_label = '等待处理'
+
         stages[step.stage]['steps'].append({
             'code': step.step_code,
             'name': step.name,
             'description': step.description,
             'is_completed': step.step_code in completed_steps,
-            'is_current': step.step_code == current_step_code
+            'is_current': step.step_code == current_step_code,
+            'submitter_role': submitter_role,
+            'action_label': action_label
         })
 
     return render_template('applicant/progress.html',
@@ -251,10 +333,22 @@ def documents():
                 'reviewed_at': cn_time_str(doc.reviewed_at),
             })
 
-    # Get all available templates (optionally filter by current stage)
+    # 获取可用模板：优先按当前步骤 step_code 过滤，同时显示通用模板
+    # Get available templates: prefer filtering by current step_code, also show general templates
     templates_query = Template.query.order_by(Template.stage, Template.name)
-    if application and application.current_stage:
-        # Show templates for current stage and general templates (stage=None)
+    if application and application.current_step:
+        # 精确过滤：当前步骤的模板 + 通用模板（无 step_code）+ 当前阶段模板
+        # Precise filter: templates for current step + general templates (no step_code) + current stage templates
+        templates_query = templates_query.filter(
+            db.or_(
+                Template.step_code == application.current_step,
+                Template.step_code.is_(None),
+                Template.stage == application.current_stage if application.current_stage else False
+            )
+        )
+    elif application and application.current_stage:
+        # 回退：仅按阶段过滤（兼容旧数据）
+        # Fallback: filter by stage only (backward compatible)
         templates_query = templates_query.filter(
             db.or_(Template.stage == application.current_stage, Template.stage.is_(None))
         )
@@ -268,10 +362,21 @@ def documents():
         'stage': t.stage
     } for t in templates]
 
+    # 获取当前步骤的 submitter_role，供模板判断是否显示上传操作
+    # Get current step's submitter_role so template can decide whether to show upload actions
+    current_step_submitter_role = 'applicant'  # 默认值
+    if application and application.current_step:
+        current_step_def = StepDefinition.query.filter_by(
+            step_code=application.current_step
+        ).first()
+        if current_step_def:
+            current_step_submitter_role = getattr(current_step_def, 'submitter_role', 'applicant')
+
     return render_template('applicant/documents.html',
                          documents=documents_list,
                          available_templates=available_templates,
-                         application=application)
+                         application=application,
+                         current_step_submitter_role=current_step_submitter_role)
 
 
 @applicant_bp.route('/template/<int:id>/download')
@@ -516,6 +621,22 @@ def api_upload_document():
     # Get form data
     doc_type = request.form.get('doc_type', 'general')
     step_code = request.form.get('step_code', application.current_step)
+
+    # 步骤级别权限校验：申请人只能在 submitter_role='applicant' 的步骤上传文档
+    # Step-level permission check: applicant can only upload on steps where submitter_role='applicant'
+    step_def = StepDefinition.query.filter_by(step_code=step_code).first()
+    if step_def and step_def.submitter_role != 'applicant':
+        # 根据步骤的提交者角色给出相应的等待提示
+        if step_def.submitter_role == 'secretary':
+            waiting_msg = '当前步骤需要书记处理，请等待书记完成操作'
+        elif step_def.submitter_role == 'admin':
+            waiting_msg = '当前步骤需要党委处理，请等待党委完成操作'
+        else:
+            waiting_msg = '当前步骤不允许申请人提交，请等待相关负责人处理'
+        return jsonify({
+            'success': False,
+            'message': waiting_msg
+        }), 403
 
     # Secure filename and create upload path
     original_filename = file.filename
@@ -780,18 +901,52 @@ def generate_todos(application, current_step_def, failed_step=None):
             'action_url': '/applicant/documents'
         })
     elif current_step_def:
-        # Check if documents are uploaded for current step
-        uploaded_count = Document.query.filter_by(
-            application_id=application.id,
-            step_code=current_step_def.step_code
-        ).count()
+        # 根据步骤的 submitter_role 判断申请人应该看到什么内容
+        # Determine what the applicant sees based on the step's submitter_role
+        submitter_role = getattr(current_step_def, 'submitter_role', 'applicant')
 
-        if uploaded_count == 0:
+        if submitter_role == 'applicant':
+            # 申请人步骤：显示上传/提交操作（原有行为）
+            # Applicant step: show upload/submit actions (original behavior)
+            uploaded_count = Document.query.filter_by(
+                application_id=application.id,
+                step_code=current_step_def.step_code
+            ).count()
+
+            if uploaded_count == 0:
+                todos.append({
+                    'title': f'上传{current_step_def.name}相关材料',
+                    'description': f'当前步骤 "{current_step_def.name}" 需要上传相关证明材料',
+                    'priority': 'urgent',
+                    'action_url': '/applicant/documents'
+                })
+        elif submitter_role == 'secretary':
+            # 书记步骤：显示等待提示
+            # Secretary step: show waiting message
             todos.append({
-                'title': f'上传{current_step_def.name}相关材料',
-                'description': f'当前步骤 "{current_step_def.name}" 需要上传相关证明材料',
-                'priority': 'urgent',
-                'action_url': '/applicant/documents'
+                'title': f'等待书记处理 - {current_step_def.name}',
+                'description': f'当前步骤 "{current_step_def.name}" 需要支部书记处理，请耐心等待',
+                'priority': 'info',
+                'action_url': None,
+                'waiting_for': 'secretary'
+            })
+        elif submitter_role == 'admin':
+            # 管理员步骤：显示等待提示
+            # Admin step: show waiting message
+            todos.append({
+                'title': f'等待党委处理 - {current_step_def.name}',
+                'description': f'当前步骤 "{current_step_def.name}" 需要党委处理，请耐心等待',
+                'priority': 'info',
+                'action_url': None,
+                'waiting_for': 'admin'
+            })
+        else:
+            # 未知角色：通用等待提示
+            todos.append({
+                'title': f'等待处理 - {current_step_def.name}',
+                'description': f'当前步骤 "{current_step_def.name}" 正在由相关负责人处理中',
+                'priority': 'info',
+                'action_url': None
             })
 
     # Check for overdue quarterly reviews (for stages 2-4)

@@ -163,6 +163,10 @@
                                 <p class="status-text error">已驳回 - {{ step.result or '' }}</p>
                                 {% if is_failed_current %}
                                 <p class="status-text current" style="margin-top: 4px;">当前步骤 - 等待重新审核</p>
+                                {# --- 根据当前步骤的 secretary_role 决定操作按钮 --- #}
+                                {% set step_approval_type = step.approval_type | default('two_level') %}
+                                {% if step_approval_type == 'two_level' %}
+                                {# Approver 模式：审批者可重新通过/驳回 #}
                                 <div class="step-actions">
                                     <button class="btn btn-sm btn-success btn-approve-step"
                                             data-app-id="{{ application.id }}"
@@ -173,11 +177,29 @@
                                             data-step-code="{{ step.step_code }}"
                                             data-action="reject">再次驳回</button>
                                 </div>
+                                {% elif step_approval_type == 'one_level' %}
+                                {# Submitter 模式：书记可重新上传提交 #}
+                                <div class="step-upload-form">
+                                    <form class="secretary-step-upload" enctype="multipart/form-data"
+                                          data-app-id="{{ application.id }}" data-step-code="{{ step.step_code }}">
+                                        <input type="file" name="file" class="step-file-input"
+                                               accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png" style="display:none;">
+                                        <button type="button" class="btn btn-sm btn-outline btn-select-file">选择文件</button>
+                                        <button type="submit" class="btn btn-sm btn-accent btn-submit-step" disabled>提交文档</button>
+                                    </form>
+                                </div>
+                                {% else %}
+                                {# none 模式：党委处理 #}
+                                <p class="status-text pending">此步骤由党委处理</p>
+                                {% endif %}
                                 {% endif %}
                                 {% else %}
                                 {% if is_current_step and application.status == 'in_progress' %}
-                                <p class="status-text current">当前步骤 - 待审批</p>
-                                <!-- 当前步骤的审批按钮 -->
+                                {# --- 当前步骤：根据 secretary_role 显示不同操作 --- #}
+                                {% set step_approval_type = step.approval_type | default('two_level') %}
+                                {% if step_approval_type == 'two_level' %}
+                                {# Approver 模式：书记作为审批者 #}
+                                <p class="status-text current">当前步骤 - 待审批（审批者）</p>
                                 <div class="step-actions">
                                     <button class="btn btn-sm btn-success btn-approve-step"
                                             data-app-id="{{ application.id }}"
@@ -188,8 +210,40 @@
                                             data-step-code="{{ step.step_code }}"
                                             data-action="reject">驳回</button>
                                 </div>
+                                {% elif step_approval_type == 'one_level' %}
+                                {# Submitter 模式：书记作为提交者 #}
+                                <p class="status-text current">当前步骤 - 待提交文档</p>
+                                <div class="step-upload-form">
+                                    <form class="secretary-step-upload" enctype="multipart/form-data"
+                                          data-app-id="{{ application.id }}" data-step-code="{{ step.step_code }}">
+                                        <input type="file" name="file" class="step-file-input"
+                                               accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png" style="display:none;">
+                                        <button type="button" class="btn btn-sm btn-outline btn-select-file">选择文件</button>
+                                        <button type="submit" class="btn btn-sm btn-accent btn-submit-step" disabled>提交文档</button>
+                                    </form>
+                                </div>
+                                {% if step.templates is defined and step.templates %}
+                                <div class="step-templates">
+                                    <span class="step-templates-label">可用模板：</span>
+                                    {% for tmpl in step.templates %}
+                                    <a href="{{ tmpl.url | default('#') }}" class="btn btn-sm btn-outline step-template-link" download>
+                                        {{ tmpl.name }}
+                                    </a>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
+                                {% else %}
+                                {# none 模式：党委处理中 #}
+                                <p class="status-text current">党委处理中</p>
+                                {% endif %}
+                                {% else %}
+                                {# 非当前步骤的待处理状态：根据审批类型显示标签 #}
+                                {% set step_approval_type = step.approval_type | default('two_level') %}
+                                {% if step_approval_type == 'none' %}
+                                <p class="status-text pending">党委处理</p>
                                 {% else %}
                                 <p class="status-text pending">待处理</p>
+                                {% endif %}
                                 {% endif %}
                                 {% endif %}
                             </div>
@@ -526,6 +580,61 @@
     margin-top: var(--spacing-sm);
 }
 
+/* ========== 步骤文件上传表单（Submitter 模式） ========== */
+.step-upload-form {
+    margin-top: var(--spacing-sm);
+}
+
+.secretary-step-upload {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
+.secretary-step-upload .file-name-display {
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 按钮风格 accent（用于提交文档） */
+.btn-accent {
+    background: var(--color-accent, #D4AF37);
+    color: white;
+    border: none;
+}
+.btn-accent:hover:not(:disabled) {
+    background: #b8962f;
+}
+.btn-accent:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ========== 步骤模板下载链接 ========== */
+.step-templates {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
+.step-templates-label {
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+}
+
+.step-template-link {
+    font-size: 0.8125rem;
+    text-decoration: none;
+}
+
 /* ========== 文档列表 ========== */
 .documents-list {
     display: flex;
@@ -765,6 +874,84 @@ document.querySelectorAll('.btn-review-doc').forEach(function(btn) {
         .catch(function(error) {
             alert('网络错误，请重试');
             siblingBtns.forEach(function(b) { b.disabled = false; });
+        });
+    });
+});
+
+/**
+ * 步骤文件上传（Submitter 模式） - 书记作为提交者上传文档
+ * 为每个步骤上传表单绑定事件：文件选择和提交
+ */
+document.querySelectorAll('.secretary-step-upload').forEach(function(form) {
+    var fileInput = form.querySelector('.step-file-input');
+    var selectBtn = form.querySelector('.btn-select-file');
+    var submitBtn = form.querySelector('.btn-submit-step');
+    var appId = form.dataset.appId;
+    var stepCode = form.dataset.stepCode;
+
+    // "选择文件" 按钮点击 -> 触发隐藏的 file input
+    selectBtn.addEventListener('click', function() {
+        fileInput.click();
+    });
+
+    // 文件选中后启用提交按钮并显示文件名
+    fileInput.addEventListener('change', function() {
+        if (fileInput.files.length > 0) {
+            submitBtn.disabled = false;
+            // 显示选中的文件名
+            var existing = form.querySelector('.file-name-display');
+            if (existing) existing.remove();
+            var nameSpan = document.createElement('span');
+            nameSpan.className = 'file-name-display';
+            nameSpan.textContent = fileInput.files[0].name;
+            selectBtn.insertAdjacentElement('afterend', nameSpan);
+        } else {
+            submitBtn.disabled = true;
+            var nameEl = form.querySelector('.file-name-display');
+            if (nameEl) nameEl.remove();
+        }
+    });
+
+    // 表单提交 -> 上传文件到 secretary submit-step API
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        if (!fileInput.files.length) {
+            alert('请先选择文件');
+            return;
+        }
+
+        if (!confirm('确认提交文档到步骤 ' + stepCode + ' ?')) return;
+
+        var formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        formData.append('step_code', stepCode);
+
+        // 禁用按钮防止重复提交
+        selectBtn.disabled = true;
+        submitBtn.disabled = true;
+        submitBtn.textContent = '提交中...';
+
+        fetch('/secretary/api/applicants/' + appId + '/submit-step', {
+            method: 'POST',
+            body: formData
+        })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            if (data.success) {
+                alert('文档已提交');
+                window.location.reload();
+            } else {
+                alert('提交失败: ' + (data.message || '未知错误'));
+                selectBtn.disabled = false;
+                submitBtn.disabled = false;
+                submitBtn.textContent = '提交文档';
+            }
+        })
+        .catch(function(error) {
+            alert('网络错误，请重试');
+            selectBtn.disabled = false;
+            submitBtn.disabled = false;
+            submitBtn.textContent = '提交文档';
         });
     });
 });
