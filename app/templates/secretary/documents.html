@@ -1,11 +1,20 @@
 {% extends "base.html" %}
-{% block title %}文档审核 - 入党文档管理系统{% endblock %}
+{% block title %}文档查看 - 入党文档管理系统{% endblock %}
 
 {% block content %}
 <div class="documents-page">
     <div class="page-header">
-        <h1 class="page-title">文档审核</h1>
-        <p class="page-subtitle">审核申请人提交的入党文档</p>
+        <h1 class="page-title">文档查看</h1>
+        <p class="page-subtitle">查看申请人提交的入党文档</p>
+        {# 弃用提示：文档审核已统一到步骤级审批 #}
+        <div class="deprecation-notice">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" style="flex-shrink:0;">
+                <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            <span>文档审核已统一到步骤级审批。单独的文档审核功能已弃用，请通过申请人详情页中的步骤操作进行审批。</span>
+        </div>
     </div>
 
     <!-- 筛选区域 -->
@@ -88,6 +97,20 @@
 .page-subtitle {
     color: var(--color-text-secondary);
     font-size: 1rem;
+}
+
+/* 弃用提示样式 */
+.deprecation-notice {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-md);
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: rgba(255, 152, 0, 0.08);
+    border: 1px solid rgba(255, 152, 0, 0.25);
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    color: #E65100;
 }
 
 /* 筛选卡片 */
@@ -301,10 +324,6 @@ async function loadDocuments() {
                     </div>
                     <div class="document-actions">
                         <button class="btn btn-sm btn-secondary" onclick="viewDocument(${doc.id})">查看</button>
-                        ${doc.status === 'pending' ? `
-                            <button class="btn btn-sm btn-success" onclick="approveDocument(${doc.id})">通过</button>
-                            <button class="btn btn-sm btn-danger" onclick="rejectDocument(${doc.id})">驳回</button>
-                        ` : ''}
                     </div>
                 </div>
             `).join('');
@@ -348,48 +367,9 @@ function viewDocument(id) {
     window.open(`/secretary/documents/${id}`, '_blank');
 }
 
-async function approveDocument(id) {
-    if (!confirm('确定要通过该文档吗?')) return;
-
-    try {
-        const response = await fetch(`/secretary/api/documents/${id}/review`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({action: 'approve'})
-        });
-        const data = await response.json();
-        if (data.success) {
-            loadDocuments();
-        } else {
-            alert(data.message || '操作失败');
-        }
-    } catch (error) {
-        console.error('审核失败:', error);
-        alert('操作失败');
-    }
-}
-
-async function rejectDocument(id) {
-    const reason = prompt('请输入驳回原因:');
-    if (!reason) return;
-
-    try {
-        const response = await fetch(`/secretary/api/documents/${id}/review`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({action: 'reject', comment: reason})
-        });
-        const data = await response.json();
-        if (data.success) {
-            loadDocuments();
-        } else {
-            alert(data.message || '操作失败');
-        }
-    } catch (error) {
-        console.error('审核失败:', error);
-        alert('操作失败');
-    }
-}
+// 弃用提示：approveDocument 和 rejectDocument 函数已移除。
+// 文档审核已统一到步骤级审批，请通过申请人详情页中的步骤操作进行审批。
+// 原有的 /secretary/api/documents/<id>/review 端点已弃用。
 
 // 初始化加载
 document.addEventListener('DOMContentLoaded', loadDocuments);

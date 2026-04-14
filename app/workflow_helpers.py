@@ -357,3 +357,57 @@ def get_approval_status_text(step_code, step_record, document=None):
 
     # 兜底：返回记录的原始状态
     return record_status or '未知状态'
+
+
+def has_required_documents(application_id, step_code):
+    """检查指定步骤是否至少存在一个文档 / Check if at least one document exists for this step.
+
+    在统一审批模型中，任何步骤的审批/提交操作都要求至少有一个文档存在。
+    此函数用于审批前的验证，确保文档已上传。
+
+    In the unified step-approval model, any approve/submit action requires
+    at least one document to exist. This function validates that before
+    an approval action is allowed.
+
+    Args:
+        application_id: 申请记录ID / Application record ID
+        step_code: 步骤代码 / Step code string
+
+    Returns:
+        bool: 如果至少存在一个文档则返回 True，否则 False
+              True if at least one document exists, False otherwise
+    """
+    return Document.query.filter_by(
+        application_id=application_id,
+        step_code=step_code
+    ).count() > 0
+
+
+def sync_document_statuses(application_id, step_code, review_status):
+    """批量更新指定步骤所有文档的审核状态 / Update all documents for a step to the given review_status.
+
+    在统一审批模型中，步骤审批通过/驳回时，该步骤关联的所有文档会自动同步状态。
+    这避免了逐个文档审批的复杂性，实现了"一步操作 = 全部文档"的简化模型。
+
+    In the unified step-approval model, when a step is approved/rejected,
+    all associated documents are automatically updated to the same status.
+    This simplifies the model: one step action = all documents handled.
+
+    Args:
+        application_id: 申请记录ID / Application record ID
+        step_code: 步骤代码 / Step code string
+        review_status: 目标审核状态，例如 'secretary_approved', 'admin_approved',
+                       'secretary_rejected', 'admin_rejected' 等
+                       Target review status, e.g. 'secretary_approved', 'admin_approved',
+                       'secretary_rejected', 'admin_rejected', etc.
+
+    Returns:
+        int: 被更新的文档数量 / Number of documents updated
+    """
+    documents = Document.query.filter_by(
+        application_id=application_id,
+        step_code=step_code
+    ).all()
+    for doc in documents:
+        doc.review_status = review_status
+    return len(documents)

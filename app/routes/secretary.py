@@ -15,10 +15,20 @@ from app import db
 # 尝试导入 workflow_helpers 辅助模块（该模块可能尚未创建）
 # 如果模块不存在，使用本地的简化实现
 try:
-    from app.workflow_helpers import can_submit, get_allowed_actions, get_step_config, get_step_templates
+    from app.workflow_helpers import can_submit, get_allowed_actions, get_step_config, get_step_templates, has_required_documents, sync_document_statuses
     _HAS_WORKFLOW_HELPERS = True
 except ImportError:
     _HAS_WORKFLOW_HELPERS = False
+    # 提供降级实现，以防 workflow_helpers 不可用
+    def has_required_documents(app_id, step_code):
+        from app.models import Document
+        return Document.query.filter_by(application_id=app_id, step_code=step_code).count() > 0
+    def sync_document_statuses(app_id, step_code, review_status):
+        from app.models import Document
+        docs = Document.query.filter_by(application_id=app_id, step_code=step_code).all()
+        for doc in docs:
+            doc.review_status = review_status
+        return len(docs)
 
 # China Standard Time (UTC+8) - used for consistent timestamp display
 CHINA_TZ = timezone(timedelta(hours=8))
@@ -476,6 +486,14 @@ def api_approve_step(id):
     # 只有 two_level 步骤，secretary 才能审批（作为初审人）
     # approval_type == 'two_level' — 继续处理
 
+    # === 文件检查：审批前必须存在至少一个文档 ===
+    # 统一审批模型要求：任何步骤的审批操作都必须有文档支撑
+    if not has_required_documents(id, step_code):
+        return jsonify({
+            'success': False,
+            'message': '请先上传相关文件'
+        }), 400
+
     # Find or create step record
     step_record = StepRecord.query.filter_by(
         application_id=id,
@@ -498,14 +516,15 @@ def api_approve_step(id):
         step_record.completed_at = datetime.utcnow()
         step_record.completed_by = current_user.id
 
-        # 同步更新该步骤关联文档的审核状态为 secretary_approved
-        pending_docs = Document.query.filter_by(
+        # 统一审批模型：书记审批步骤时，同步更新该步骤所有文档状态
+        # 所有文档（不区分当前状态）统一设置为 secretary_approved
+        sync_document_statuses(id, step_code, 'secretary_approved')
+        # 同时记录审核人和审核时间
+        all_docs = Document.query.filter_by(
             application_id=id,
-            step_code=step_code,
-            review_status='pending'
+            step_code=step_code
         ).all()
-        for doc in pending_docs:
-            doc.review_status = 'secretary_approved'
+        for doc in all_docs:
             doc.reviewed_by = current_user.id
             doc.reviewed_at = datetime.utcnow()
 
@@ -534,13 +553,15 @@ def api_approve_step(id):
         step_record.completed_at = datetime.utcnow()
         step_record.completed_by = current_user.id
 
-        # 同步驳回该步骤关联的文档
-        pending_docs = Document.query.filter_by(
+        # 统一审批模型：书记驳回步骤时，同步更新该步骤所有文档状态
+        # 所有文档统一设置为 secretary_rejected
+        sync_document_statuses(id, step_code, 'secretary_rejected')
+        # 同时记录审核人和审核时间
+        all_docs = Document.query.filter_by(
             application_id=id,
             step_code=step_code
-        ).filter(Document.review_status.in_(['pending', 'secretary_approved'])).all()
-        for doc in pending_docs:
-            doc.review_status = 'secretary_rejected'
+        ).all()
+        for doc in all_docs:
             doc.reviewed_by = current_user.id
             doc.reviewed_at = datetime.utcnow()
 
@@ -924,6 +945,16 @@ def api_get_documents():
 @secretary_required
 def api_review_document(id):
     """
+    [已废弃 / DEPRECATED] 请使用步骤级别审批接口 approve-step 代替。
+
+    此端点已废弃，将在未来版本中移除。新代码应使用步骤级别审批接口
+    POST /secretary/api/applicants/<id>/approve-step，该接口在审批步骤时
+    自动同步处理所有关联文档的审核状态。
+
+    保留此端点仅为向后兼容，功能不受影响。
+
+    ---
+    Original docstring (for reference):
     Review a document (approve or reject).
     Updates the Document's review_status, reviewed_by, reviewed_at, review_comment,
     and also updates the linked StepRecord if the document has a step_code.

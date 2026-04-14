@@ -257,12 +257,26 @@
         </div>
     </div>
 
-    <!-- 四、相关文档列表 -->
+    {# ============================================
+       四、相关文档列表（只读展示）
+       文档审核已统一到步骤级审批，不再提供单独的文档审批按钮。
+       文档状态仅作展示参考，实际审批通过上方时间线中的步骤操作完成。
+       ============================================ #}
     <div class="card card-decorated mb-lg">
         <div class="card-header">
             <h3 class="card-title">相关文档</h3>
         </div>
         <div class="card-body">
+            {# 提示信息：文档仅供查看，审批在步骤级别完成 #}
+            <div class="doc-readonly-hint">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="flex-shrink:0;">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                </svg>
+                <span>文档审核已统一到步骤级审批，请通过上方时间线中的步骤操作进行审批</span>
+            </div>
+
             {% if documents and documents|length > 0 %}
             <div class="documents-list">
                 {% for doc in documents %}
@@ -276,7 +290,7 @@
                         <span class="doc-name">{{ doc.original_filename or doc.filename }}</span>
                         <span class="doc-meta">{{ doc.step_code }} | {{ doc.uploaded_at|cn_time }}</span>
                     </div>
-                    <!-- 文档审核状态徽章 -->
+                    {# 文档审核状态徽章（只读展示，无操作按钮） #}
                     <div class="doc-review-status">
                         {% if doc.review_status == 'admin_approved' %}
                         <span class="badge badge-success">最终通过</span>
@@ -284,32 +298,10 @@
                         <span class="badge badge-info">书记已审待上级</span>
                         {% elif doc.review_status == 'secretary_rejected' %}
                         <span class="badge badge-danger">书记已驳回</span>
-                        {% if doc.review_comment %}
-                        <span class="doc-review-comment">{{ doc.review_comment }}</span>
-                        {% endif %}
                         {% elif doc.review_status == 'admin_rejected' %}
                         <span class="badge badge-danger">管理员已驳回</span>
-                        {% if doc.review_comment %}
-                        <span class="doc-review-comment">{{ doc.review_comment }}</span>
-                        {% endif %}
                         {% else %}
                         <span class="badge badge-warning">待审核</span>
-                        {% endif %}
-                    </div>
-                    <!-- 文档操作按钮 -->
-                    <div class="doc-review-actions">
-                        {% if doc.review_status == 'pending' or not doc.review_status %}
-                        <button class="btn btn-sm btn-success btn-review-doc"
-                                data-doc-id="{{ doc.id }}"
-                                data-action="approve">通过</button>
-                        <button class="btn btn-sm btn-danger btn-review-doc"
-                                data-doc-id="{{ doc.id }}"
-                                data-action="reject">驳回</button>
-                        {% endif %}
-                        {% if doc.review_status == 'admin_rejected' %}
-                        <button class="btn btn-sm btn-success btn-review-doc"
-                                data-doc-id="{{ doc.id }}"
-                                data-action="approve">重新通过</button>
                         {% endif %}
                     </div>
                 </div>
@@ -701,6 +693,20 @@
     flex-shrink: 0;
 }
 
+/* 文档只读提示 */
+.doc-readonly-hint {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: rgba(33, 150, 243, 0.06);
+    border: 1px solid rgba(33, 150, 243, 0.15);
+    border-radius: var(--radius-md);
+    font-size: 0.8125rem;
+    color: #1565C0;
+}
+
 /* ========== 徽章 ========== */
 .badge {
     display: inline-flex;
@@ -837,46 +843,10 @@ document.querySelectorAll('.btn-approve-step').forEach(function(btn) {
 });
 
 /**
- * 文档审核（通过/驳回） - 调用 secretary 文档审核 API
+ * 文档审核按钮已移除 - 审批已统一到步骤级
+ * 原有的 /secretary/api/documents/<id>/review 端点已弃用。
+ * 文档审批现在通过上方的步骤级审批按钮完成。
  */
-document.querySelectorAll('.btn-review-doc').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-        var docId = this.dataset.docId;
-        var action = this.dataset.action;
-        var actionLabel = action === 'approve' ? '通过' : '驳回';
-
-        var comment = '';
-        if (action === 'reject') {
-            comment = prompt('请输入驳回原因:');
-            if (comment === null) return;
-        } else {
-            if (!confirm('确认审核' + actionLabel + '该文档？')) return;
-        }
-
-        var siblingBtns = this.parentElement.querySelectorAll('.btn-review-doc');
-        siblingBtns.forEach(function(b) { b.disabled = true; });
-
-        fetch('/secretary/api/documents/' + docId + '/review', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: action, comment: comment || '' })
-        })
-        .then(function(response) { return response.json(); })
-        .then(function(data) {
-            if (data.success) {
-                alert('文档已审核' + actionLabel);
-                window.location.reload();
-            } else {
-                alert('操作失败: ' + (data.message || '未知错误'));
-                siblingBtns.forEach(function(b) { b.disabled = false; });
-            }
-        })
-        .catch(function(error) {
-            alert('网络错误，请重试');
-            siblingBtns.forEach(function(b) { b.disabled = false; });
-        });
-    });
-});
 
 /**
  * 步骤文件上传（Submitter 模式） - 书记作为提交者上传文档

@@ -200,7 +200,11 @@
        适用于 two_level 和 one_level 审批类型
        ============================================ #}
 
-    <!-- 相关文档 -->
+    {# ============================================
+       相关文档区块（只读展示）
+       文档仅供下载查看，不再提供单独的文档审批按钮。
+       所有审批操作在上方"审批操作"表单中统一步骤级完成。
+       ============================================ #}
     <div class="card card-decorated mb-lg">
         <div class="card-header">
             <h3 class="card-title">相关文档</h3>
@@ -214,6 +218,16 @@
             {% endif %}
         </div>
         <div class="card-body">
+            {# 提示信息：文档仅供查看，审批在步骤级别完成 #}
+            <div class="doc-readonly-hint">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="flex-shrink:0;">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                </svg>
+                <span>以下文档仅供下载查看，审批操作请使用下方"审批操作"表单（步骤级审批）</span>
+            </div>
+
             {% if documents and documents|length > 0 %}
             <div class="documents-grid">
                 {% for doc in documents %}
@@ -271,7 +285,13 @@
     </div>
     {% endif %}
 
-    <!-- 审批表单 -->
+    {# ============================================
+       审批表单（统一步骤级审批）
+       通过 JavaScript fetch() 调用统一端点:
+       POST /admin/api/applications/<id>/approve-step
+       请求体: { step_code, action: 'approve'|'reject', comment }
+       不再有单独的文档审核按钮，所有审批在步骤级别完成。
+       ============================================ #}
     <div class="card card-decorated">
         <div class="card-header">
             <h3 class="card-title">审批操作</h3>
@@ -283,7 +303,7 @@
             {% endif %}
         </div>
         <div class="card-body">
-            <form id="reviewForm" method="POST">
+            <form id="reviewForm">
                 <input type="hidden" name="step_code" value="{{ step_def.step_code if step_def else application.current_step }}">
 
                 <div class="form-group">
@@ -522,6 +542,20 @@
 .status-pending-secretary {
     background: rgba(255, 152, 0, 0.1);
     color: #E65100;
+}
+
+/* 文档只读提示 */
+.doc-readonly-hint {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: rgba(33, 150, 243, 0.06);
+    border: 1px solid rgba(33, 150, 243, 0.15);
+    border-radius: var(--radius-md);
+    font-size: 0.8125rem;
+    color: #1565C0;
 }
 
 /* 文档网格 */
@@ -962,31 +996,55 @@
 
 <script>
 /**
- * 提交审批操作（传统审批流程）
+ * 提交审批操作（统一步骤级审批流程）
  * 用于 two_level 和 one_level 审批类型
+ * 调用统一端点: /admin/api/applications/<id>/approve-step
+ * 请求体: { step_code, action: 'approve'|'reject', comment }
  */
 function submitReview(action) {
     const form = document.getElementById('reviewForm');
     const formData = new FormData(form);
-
-    // 添加action
-    const actionInput = document.createElement('input');
-    actionInput.type = 'hidden';
-    actionInput.name = 'action';
-    actionInput.value = action;
-    form.appendChild(actionInput);
+    const stepCode = formData.get('step_code');
+    const comment = formData.get('result') || '';
 
     if (action === 'reject') {
-        const result = formData.get('result');
-        if (!result.trim()) {
+        if (!comment.trim()) {
             if (!confirm('驳回操作需要填写审批意见，确定要继续吗？')) {
-                actionInput.remove();
                 return;
             }
         }
     }
 
-    form.submit();
+    // 禁用按钮防止重复提交
+    var btns = form.querySelectorAll('.form-actions button');
+    btns.forEach(function(b) { b.disabled = true; });
+
+    fetch('/admin/api/applications/{{ application.id }}/approve-step', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            step_code: stepCode,
+            action: action,
+            comment: comment
+        })
+    })
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+        if (data.success) {
+            showToast('审批操作成功', 'success');
+            setTimeout(function() {
+                window.location.href = '{{ url_for("admin.approval_detail", approval_id=application.id) }}';
+            }, 1000);
+        } else {
+            alert('操作失败: ' + (data.message || data.error || '未知错误'));
+            btns.forEach(function(b) { b.disabled = false; });
+        }
+    })
+    .catch(function(error) {
+        console.error('审批请求失败:', error);
+        alert('操作失败，请检查网络连接后重试');
+        btns.forEach(function(b) { b.disabled = false; });
+    });
 }
 
 /**

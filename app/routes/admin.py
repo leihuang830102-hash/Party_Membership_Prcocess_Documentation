@@ -14,6 +14,22 @@ from sqlalchemy import func
 from app import db
 from app.models import User, Branch, Template, Application, StepRecord, StepDefinition, Document, Notification
 
+# 导入工作流辅助函数
+# Import workflow helper functions
+try:
+    from app.workflow_helpers import has_required_documents, sync_document_statuses
+    _HAS_WORKFLOW_HELPERS = True
+except ImportError:
+    _HAS_WORKFLOW_HELPERS = False
+    # 降级实现，以防 workflow_helpers 不可用
+    def has_required_documents(app_id, step_code):
+        return Document.query.filter_by(application_id=app_id, step_code=step_code).count() > 0
+    def sync_document_statuses(app_id, step_code, review_status):
+        docs = Document.query.filter_by(application_id=app_id, step_code=step_code).all()
+        for doc in docs:
+            doc.review_status = review_status
+        return len(docs)
+
 # China Standard Time (UTC+8) - used for consistent timestamp display
 CHINA_TZ = timezone(timedelta(hours=8))
 
@@ -1025,6 +1041,223 @@ def download_document(doc_id):
     )
 
 
+# ==================== Step Approval API (unified) ====================
+# 统一步骤审批接口：管理员审批/驳回整个步骤，自动处理所有关联文档
+# Unified step approval: admin approves/rejects the entire step,
+# automatically handling all associated documents.
+
+@admin_bp.route('/api/applications/<int:app_id>/approve-step', methods=['POST'])
+@admin_required
+def api_approve_step(app_id):
+    """
+    统一步骤审批接口：管理员审批或驳回整个步骤，自动同步所有关联文档状态。
+
+    根据步骤的 approval_type 执行不同的审批逻辑：
+    - two_level: 要求 StepRecord 为 secretary_approved（书记已审批通过）
+                 审批通过 -> 步骤完成，所有文档 admin_approved，推进到下一步
+                 驳回 -> 步骤失败，所有文档 admin_rejected，不推进
+    - one_level: 要求 StepRecord 为 pending 且至少有一个文档存在
+                 审批通过 -> 步骤完成，所有文档 admin_approved，推进到下一步
+                 驳回 -> 步骤失败，所有文档 admin_rejected，不推进
+
+    在任何审批操作前，必须确保至少存在一个文档（文件为必填项）。
+
+    Request body:
+    - step_code: 要审批的步骤代码（必需）
+    - action: 'approve' 或 'reject'（必需）
+    - result: 可选的备注/驳回原因
+    """
+    application = Application.query.get_or_404(app_id)
+
+    # 检查申请是否在进行中
+    if application.status != 'in_progress':
+        return jsonify({'success': False, 'message': '该申请已结束'}), 400
+
+    data = request.get_json()
+    step_code = data.get('step_code')
+    action = data.get('action')
+    result_text = data.get('result', '')
+
+    if not step_code:
+        return jsonify({'success': False, 'message': '缺少步骤代码'}), 400
+
+    if action not in ('approve', 'reject'):
+        return jsonify({'success': False, 'message': '无效的操作类型，必须为 approve 或 reject'}), 400
+
+    # 验证：只能审批当前步骤（顺序执行）
+    if application.current_step != step_code:
+        return jsonify({
+            'success': False,
+            'message': f'只能审批当前步骤（当前步骤: {application.current_step}），无法跳过或乱序审批'
+        }), 400
+
+    # 获取步骤定义
+    step_def = StepDefinition.query.filter_by(step_code=step_code).first()
+    if not step_def:
+        return jsonify({'success': False, 'message': '无效的步骤代码'}), 400
+
+    approval_type = getattr(step_def, 'approval_type', 'two_level')
+
+    # none 类型步骤不应通过此接口审批（应使用 self-service-step）
+    if approval_type == 'none':
+        return jsonify({
+            'success': False,
+            'message': '无需审批的步骤请使用自助服务接口操作'
+        }), 400
+
+    # === 文件检查：审批前必须存在至少一个文档 ===
+    if not has_required_documents(app_id, step_code):
+        return jsonify({
+            'success': False,
+            'message': '请先上传相关文件'
+        }), 400
+
+    # 查找步骤记录
+    step_record = StepRecord.query.filter_by(
+        application_id=app_id,
+        step_code=step_code
+    ).first()
+
+    # 根据 approval_type 验证步骤记录状态
+    if approval_type == 'two_level':
+        # 两级审批：要求步骤已通过书记审批（secretary_approved）
+        if not step_record or step_record.status != 'secretary_approved':
+            current_status = step_record.status if step_record else '未创建'
+            return jsonify({
+                'success': False,
+                'message': f'两级审批步骤需先通过书记审核（当前状态: {current_status}）'
+            }), 400
+
+    elif approval_type == 'one_level':
+        # 一级审批：要求步骤记录存在且有文档（已在上方检查）
+        if not step_record:
+            return jsonify({
+                'success': False,
+                'message': '步骤记录不存在，请先提交文档'
+            }), 400
+        # 步骤记录应为 pending 或 failed（驳回后重新提交）
+        if step_record.status not in ('pending', 'failed'):
+            return jsonify({
+                'success': False,
+                'message': f'步骤状态不正确（当前状态: {step_record.status}）'
+            }), 400
+
+    # 创建步骤记录（如果不存在且验证通过）
+    if not step_record:
+        step_record = StepRecord(
+            application_id=app_id,
+            step_code=step_code,
+            status='pending'
+        )
+        db.session.add(step_record)
+
+    if action == 'approve':
+        # 审批通过：标记步骤完成
+        step_record.status = 'completed'
+        step_record.result = result_text if result_text else '审批通过'
+        step_record.completed_at = datetime.utcnow()
+        step_record.completed_by = current_user.id
+
+        # 统一审批模型：同步更新该步骤所有文档为 admin_approved
+        sync_document_statuses(app_id, step_code, 'admin_approved')
+        # 记录审核人和审核时间
+        all_docs = Document.query.filter_by(
+            application_id=app_id,
+            step_code=step_code
+        ).all()
+        for doc in all_docs:
+            doc.reviewed_by = current_user.id
+            doc.reviewed_at = datetime.utcnow()
+
+        # 推进到下一步
+        next_step = StepDefinition.query.filter(
+            StepDefinition.order_num > step_def.order_num
+        ).order_by(StepDefinition.order_num).first()
+
+        next_step_info = None
+        if next_step:
+            application.current_step = next_step.step_code
+            application.current_stage = next_step.stage
+            next_step_info = {
+                'step_code': next_step.step_code,
+                'step_name': next_step.name,
+                'stage': next_step.stage
+            }
+        else:
+            # 所有步骤完成
+            application.status = 'completed'
+
+        # 创建通知给申请人
+        notification = Notification(
+            user_id=application.user_id,
+            title=f'步骤审批通过: {step_def.name}',
+            content=f'管理员已审批通过步骤「{step_def.name}」' +
+                    (f'，备注: {result_text}' if result_text else ''),
+            link=f'/applicant/applications/{application.id}',
+            is_read=False
+        )
+        db.session.add(notification)
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': '步骤审批通过',
+            'data': {
+                'step_code': step_code,
+                'step_name': step_def.name,
+                'status': 'completed',
+                'next_step': next_step_info,
+                'application_status': application.status
+            }
+        })
+
+    else:
+        # 驳回：标记步骤失败
+        step_record.status = 'failed'
+        step_record.result = result_text if result_text else '审批不通过'
+        step_record.completed_at = datetime.utcnow()
+        step_record.completed_by = current_user.id
+
+        # 统一审批模型：同步更新该步骤所有文档为 admin_rejected
+        sync_document_statuses(app_id, step_code, 'admin_rejected')
+        # 记录审核人和审核时间
+        all_docs = Document.query.filter_by(
+            application_id=app_id,
+            step_code=step_code
+        ).all()
+        for doc in all_docs:
+            doc.reviewed_by = current_user.id
+            doc.reviewed_at = datetime.utcnow()
+
+        # 不推进步骤，保持当前步骤不变
+
+        # 创建通知给申请人
+        notification = Notification(
+            user_id=application.user_id,
+            title=f'步骤被驳回: {step_def.name}',
+            content=f'管理员驳回了步骤「{step_def.name}」' +
+                    (f'，原因: {result_text}' if result_text else ''),
+            link=f'/applicant/applications/{application.id}',
+            is_read=False
+        )
+        db.session.add(notification)
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': '步骤已驳回',
+            'data': {
+                'step_code': step_code,
+                'step_name': step_def.name,
+                'status': 'failed',
+                'result': step_record.result,
+                'current_step': application.current_step
+            }
+        })
+
+
 # ==================== Document Review API ====================
 
 @admin_bp.route('/api/documents/<int:doc_id>', methods=['DELETE'])
@@ -1064,6 +1297,16 @@ def api_delete_document(doc_id):
 @admin_required
 def api_review_document(doc_id):
     """
+    [已废弃 / DEPRECATED] 请使用步骤级别审批接口 approve-step 代替。
+
+    此端点已废弃，将在未来版本中移除。新代码应使用步骤级别审批接口
+    POST /admin/api/applications/<app_id>/approve-step，该接口在审批步骤时
+    自动同步处理所有关联文档的审核状态。
+
+    保留此端点仅为向后兼容，功能不受影响。
+
+    ---
+    Original docstring (for reference):
     Review a document (approve or reject) as admin.
     Supports THREE distinct flows based on step_def.approval_type:
 
@@ -1265,6 +1508,15 @@ def api_self_service_step(app_id):
                 review_status='admin_approved'  # 自助上传自动通过
             )
             db.session.add(uploaded_doc)
+
+    # === 文件检查：确认完成前必须存在至少一个文档 ===
+    # 统一审批模型要求：任何步骤完成操作都必须有文档支撑
+    # 如果本次请求没有上传文件（uploaded_doc is None），检查是否已有之前的文档
+    if uploaded_doc is None and not has_required_documents(application.id, step_code):
+        return jsonify({
+            'success': False,
+            'error': '请先上传相关文件后再确认完成'
+        }), 400
 
     # 查找或创建步骤记录
     step_record = StepRecord.query.filter_by(
@@ -1506,4 +1758,51 @@ def api_self_service_applications():
     return jsonify({
         'applications': apps_data,
         'total': len(apps_data)
+    })
+
+
+@admin_bp.route('/api/applications/<int:app_id>/reset', methods=['POST'])
+@admin_required
+def api_reset_application(app_id):
+    """Reset an application to its initial state (current_step=L1, stage=1).
+
+    Deletes all step records and documents for the application, then resets
+    the current_step and current_stage back to the beginning. This is used
+    primarily for E2E test cleanup to ensure a clean starting state.
+
+    Request body (optional JSON):
+    - confirm: must be true to actually perform the reset
+    """
+    application = Application.query.get_or_404(app_id)
+
+    # Safety check: require explicit confirmation
+    data = request.get_json(silent=True) or {}
+    if not data.get('confirm'):
+        return jsonify({
+            'success': False,
+            'message': '必须设置 confirm=true 才能重置申请'
+        }), 400
+
+    # Delete all step records for this application
+    StepRecord.query.filter_by(application_id=app_id).delete()
+
+    # Delete all documents for this application
+    Document.query.filter_by(application_id=app_id).delete()
+
+    # Reset the application to its initial state
+    application.current_step = 'L1'
+    application.current_stage = 1
+    application.status = 'in_progress'
+
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'message': f'申请 {app_id} 已重置到初始状态',
+        'data': {
+            'id': application.id,
+            'current_step': application.current_step,
+            'current_stage': application.current_stage,
+            'status': application.status
+        }
     })
