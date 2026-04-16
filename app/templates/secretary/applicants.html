@@ -20,11 +20,11 @@
                     <label class="filter-label">当前阶段</label>
                     <select id="stageFilter" class="form-control">
                         <option value="">全部阶段</option>
-                        <option value="1">第一阶段</option>
-                        <option value="2">第二阶段</option>
-                        <option value="3">第三阶段</option>
-                        <option value="4">第四阶段</option>
-                        <option value="5">第五阶段</option>
+                        <option value="1">入党申请阶段</option>
+                        <option value="2">入党积极分子阶段</option>
+                        <option value="3">发展对象阶段</option>
+                        <option value="4">预备党员接收阶段</option>
+                        <option value="5">预备党员考察和转正阶段</option>
                     </select>
                 </div>
                 <div class="filter-group">
@@ -264,7 +264,7 @@ async function loadApplicants() {
                         <div class="applicant-name">${app.name || app.username}</div>
                         <div class="applicant-meta">
                                 <span>${app.employee_id || '无工号'}</span>
-                                <span>第${app.current_stage || 1}阶段</span>
+                                <span>${(() => { const names = {1:'入党申请阶段',2:'入党积极分子阶段',3:'发展对象阶段',4:'预备党员接收阶段',5:'预备党员考察和转正阶段'}; return names[app.current_stage || 1] || '第'+(app.current_stage||1)+'阶段'; })()}</span>
                                 <span class="status-badge status-${app.status}">${app.status === 'in_progress' ? '进行中' : '已完成'}</span>
                             </div>
                     </div>

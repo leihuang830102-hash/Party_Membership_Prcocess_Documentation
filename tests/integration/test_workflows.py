@@ -144,6 +144,7 @@ class TestSecretaryApprovalWorkflow:
         """Test secretary can access applicants page"""
         page = logged_in_secretary
         page.goto("http://127.0.0.1:5003/secretary/applicants")
+        page.wait_for_load_state("networkidle")
         expect(page.locator('#applicantsList')).to_be_visible()
 
     def test_documents_page_loads(self, logged_in_secretary):

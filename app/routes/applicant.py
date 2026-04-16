@@ -71,11 +71,11 @@ def allowed_file(filename):
 def get_stage_name(stage):
     """Get stage name by stage number."""
     stage_names = {
-        1: '第一阶段：递交入党申请书',
-        2: '第二阶段：确定入党积极分子',
-        3: '第三阶段：确定发展对象',
-        4: '第四阶段：确定预备党员',
-        5: '第五阶段：确定正式党员'
+        1: '第一阶段：入党申请阶段',
+        2: '第二阶段：入党积极分子阶段',
+        3: '第三阶段：发展对象阶段',
+        4: '第四阶段：预备党员接收阶段',
+        5: '第五阶段：预备党员考察和转正阶段'
     }
     return stage_names.get(stage, '未知阶段')
 

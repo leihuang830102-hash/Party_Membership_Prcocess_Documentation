@@ -22,7 +22,7 @@
                 <div class="applicant-avatar">{{ application.user.name[0] if application.user and application.user.name else '?' }}</div>
                 <div class="applicant-details">
                     <h3>{{ application.user.name if application.user else '-' }}</h3>
-                    <p>{{ application.branch.name if application.branch else '-' }} | 第{{ application.current_stage }}阶段</p>
+                    <p>{{ application.branch.name if application.branch else '-' }} | {% set sn = {1:'入党申请阶段',2:'入党积极分子阶段',3:'发展对象阶段',4:'预备党员接收阶段',5:'预备党员考察和转正阶段'} %}{{ sn.get(application.current_stage, '第'+application.current_stage|string+'阶段') }}</p>
                 </div>
             </div>
         </div>
@@ -86,6 +86,35 @@
                 </svg>
                 <span>此步骤为一级审批流程：书记已提交文档，您是唯一审批人</span>
             </div>
+            {% endif %}
+
+            {# 步骤级审批表单（嵌入当前步骤卡片，避免滚动查找） #}
+            {% if step_def.approval_type != 'none' %}
+            <form id="reviewForm" style="margin-top: var(--spacing-lg);">
+                <input type="hidden" name="step_code" value="{{ step_def.step_code }}">
+                <div class="form-group">
+                    <label class="form-label">审批意见</label>
+                    <textarea name="result" class="form-control" rows="3" placeholder="请输入审批意见（选填）"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-success btn-lg" onclick="submitReview('approve')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                            <path d="M22 11.08V12a10 10 0 11-5.93-9.14"></path>
+                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        </svg>
+                        {% if step_def.approval_type == 'two_level' %}最终审批通过{% else %}审批通过{% endif %}
+                    </button>
+                    <button type="button" class="btn btn-danger btn-lg" onclick="submitReview('reject')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="15" y1="9" x2="9" y2="15"></line>
+                            <line x1="9" y1="9" x2="15" y2="15"></line>
+                        </svg>
+                        驳回
+                    </button>
+                    <a href="{{ url_for('admin.approval_detail', approval_id=application.id) }}" class="btn btn-secondary btn-lg">取消</a>
+                </div>
+            </form>
             {% endif %}
         </div>
     </div>
@@ -201,13 +230,13 @@
        ============================================ #}
 
     {# ============================================
-       相关文档区块（只读展示）
-       文档仅供下载查看，不再提供单独的文档审批按钮。
-       所有审批操作在上方"审批操作"表单中统一步骤级完成。
+       相关文档区块（逐文档审批）
+       管理员可对每个文档单独进行通过/驳回操作。
+       当所有文档都通过后，步骤自动完成并推进到下一步。
        ============================================ #}
     <div class="card card-decorated mb-lg">
         <div class="card-header">
-            <h3 class="card-title">相关文档</h3>
+            <h3 class="card-title">相关文档（逐文档审批）</h3>
             {# 文档状态标签根据审批类型区分显示 #}
             {% if documents and documents|length > 0 %}
                 {% if step_def and step_def.approval_type == 'two_level' %}
@@ -218,32 +247,73 @@
             {% endif %}
         </div>
         <div class="card-body">
-            {# 提示信息：文档仅供查看，审批在步骤级别完成 #}
-            <div class="doc-readonly-hint">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="flex-shrink:0;">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="12" y1="16" x2="12" y2="12"></line>
-                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                </svg>
-                <span>以下文档仅供下载查看，审批操作请使用下方"审批操作"表单（步骤级审批）</span>
-            </div>
-
             {% if documents and documents|length > 0 %}
-            <div class="documents-grid">
+            <div class="doc-review-list">
                 {% for doc in documents %}
-                <div class="document-card">
-                    <div class="doc-preview">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48">
-                            <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                        </svg>
+                <div class="doc-review-item" id="doc-item-{{ doc.id }}">
+                    <div class="doc-review-file-info">
+                        <div class="doc-review-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32">
+                                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                        </div>
+                        <div class="doc-review-name-wrap">
+                            <span class="doc-name">{{ doc.original_filename or doc.filename }}</span>
+                            <span class="doc-meta">{{ doc.uploaded_at|cn_time }}</span>
+                        </div>
                     </div>
-                    <div class="doc-info">
-                        <span class="doc-name">{{ doc.original_filename or doc.filename }}</span>
-                        <span class="doc-meta">{{ doc.uploaded_at|cn_time }}</span>
+
+                    {# 文档审核状态徽章 #}
+                    <div class="doc-review-status-badge">
+                        {% if doc.review_status == 'admin_approved' %}
+                        <span class="badge badge-reviewed-approved">已审核通过</span>
+                        {% elif doc.review_status == 'admin_rejected' %}
+                        <span class="badge badge-reviewed-rejected">已驳回</span>
+                        {% if doc.review_comment %}
+                        <span class="doc-rejection-reason">{{ doc.review_comment }}</span>
+                        {% endif %}
+                        {% elif doc.review_status == 'secretary_approved' %}
+                        <span class="badge badge-secretary-approved">书记已审待上级</span>
+                        {% else %}
+                        <span class="badge badge-pending">待审核</span>
+                        {% endif %}
                     </div>
-                    <a href="{{ url_for('admin.download_document', doc_id=doc.id) }}" class="btn btn-sm btn-outline">下载查看</a>
+
+                    {# 逐文档审批按钮区域 - 仅对需要审核的文档显示 #}
+                    <div class="doc-review-buttons">
+                        {% if doc.review_status == 'admin_approved' %}
+                        {# 已通过：无操作 #}
+                        {% elif doc.review_status == 'admin_rejected' %}
+                        {# 已驳回：显示驳回原因（上面已显示），无操作 #}
+                        {% elif doc.review_status == 'secretary_approved' or doc.review_status == 'pending' %}
+                        {# 需要审核的文档：显示通过/驳回按钮 #}
+                        <button type="button" class="btn btn-sm btn-success btn-doc-review"
+                                data-doc-id="{{ doc.id }}" data-action="approve"
+                                title="审核通过此文档">通过</button>
+                        <button type="button" class="btn btn-sm btn-danger btn-doc-review"
+                                data-doc-id="{{ doc.id }}" data-action="reject"
+                                title="驳回此文档">退回</button>
+                        <input type="text" class="doc-reject-input" id="reject-comment-{{ doc.id }}"
+                               placeholder="退回原因（退回时填写）" style="display:none;">
+                        {% endif %}
+                        <a href="{{ url_for('admin.download_document', doc_id=doc.id) }}" class="btn btn-sm btn-outline">下载</a>
+                    </div>
                 </div>
                 {% endfor %}
+            </div>
+
+            {# 文档审批进度汇总 #}
+            {% set approved_count = documents|selectattr('review_status', 'equalto', 'admin_approved')|list|length %}
+            {% set rejected_count = documents|selectattr('review_status', 'equalto', 'admin_rejected')|list|length %}
+            {% set pending_count = documents|length - approved_count - rejected_count %}
+            <div class="doc-review-progress">
+                <span>审核进度：{{ approved_count }}/{{ documents|length }} 已通过</span>
+                {% if rejected_count > 0 %}
+                <span class="doc-progress-rejected"> | {{ rejected_count }} 已退回</span>
+                {% endif %}
+                {% if pending_count > 0 %}
+                <span class="doc-progress-pending"> | {{ pending_count }} 待审核</span>
+                {% endif %}
             </div>
             {% else %}
             <div class="empty-state">
@@ -281,59 +351,6 @@
                 </div>
                 {% endfor %}
             </div>
-        </div>
-    </div>
-    {% endif %}
-
-    {# ============================================
-       审批表单（统一步骤级审批）
-       通过 JavaScript fetch() 调用统一端点:
-       POST /admin/api/applications/<id>/approve-step
-       请求体: { step_code, action: 'approve'|'reject', comment }
-       不再有单独的文档审核按钮，所有审批在步骤级别完成。
-       ============================================ #}
-    <div class="card card-decorated">
-        <div class="card-header">
-            <h3 class="card-title">审批操作</h3>
-            {# 在审批表单标题旁显示审批类型提示 #}
-            {% if step_def and step_def.approval_type == 'two_level' %}
-            <span class="approval-type-badge badge-two-level">二级审批 - 最终审批</span>
-            {% elif step_def and step_def.approval_type == 'one_level' %}
-            <span class="approval-type-badge badge-one-level">一级审批</span>
-            {% endif %}
-        </div>
-        <div class="card-body">
-            <form id="reviewForm">
-                <input type="hidden" name="step_code" value="{{ step_def.step_code if step_def else application.current_step }}">
-
-                <div class="form-group">
-                    <label class="form-label">审批意见</label>
-                    <textarea name="result" class="form-control" rows="3" placeholder="请输入审批意见（选填）"></textarea>
-                </div>
-
-                <div class="form-actions">
-                    <button type="button" class="btn btn-success btn-lg" onclick="submitReview('approve')">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
-                            <path d="M22 11.08V12a10 10 0 11-5.93-9.14"></path>
-                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                        </svg>
-                        {% if step_def and step_def.approval_type == 'two_level' %}
-                        最终审批通过
-                        {% else %}
-                        审批通过
-                        {% endif %}
-                    </button>
-                    <button type="button" class="btn btn-danger btn-lg" onclick="submitReview('reject')">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <line x1="15" y1="9" x2="9" y2="15"></line>
-                            <line x1="9" y1="9" x2="15" y2="15"></line>
-                        </svg>
-                        驳回
-                    </button>
-                    <a href="{{ url_for('admin.approval_detail', approval_id=application.id) }}" class="btn btn-secondary btn-lg">取消</a>
-                </div>
-            </form>
         </div>
     </div>
     {% endif %}
@@ -546,6 +563,157 @@
 
 /* 文档只读提示 */
 .doc-readonly-hint {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: rgba(33, 150, 243, 0.06);
+    border: 1px solid rgba(33, 150, 243, 0.15);
+    border-radius: var(--radius-md);
+    font-size: 0.8125rem;
+    color: #1565C0;
+}
+
+/* 文档逐文档审批列表 */
+.doc-review-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+}
+
+.doc-review-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    background: var(--color-bg-light);
+    border-radius: var(--radius-md);
+    transition: background var(--transition-fast);
+}
+
+.doc-review-item:hover {
+    background: var(--color-bg-gray);
+}
+
+.doc-review-file-info {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    flex: 1;
+    min-width: 0;
+}
+
+.doc-review-icon {
+    flex-shrink: 0;
+    color: var(--color-primary);
+}
+
+.doc-review-name-wrap {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.doc-review-status-badge {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+}
+
+/* 审核状态徽章 */
+.badge-reviewed-approved {
+    background: rgba(46, 139, 87, 0.15);
+    color: #2E7D32;
+    padding: 3px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.badge-reviewed-rejected {
+    background: rgba(220, 20, 60, 0.12);
+    color: #C62828;
+    padding: 3px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.badge-secretary-approved {
+    background: rgba(33, 150, 243, 0.1);
+    color: #1565C0;
+    padding: 3px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.badge-pending {
+    background: rgba(255, 152, 0, 0.1);
+    color: #E65100;
+    padding: 3px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+/* 驳回原因文字 */
+.doc-rejection-reason {
+    font-size: 0.75rem;
+    color: #C62828;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 文档审批按钮区 */
+.doc-review-buttons {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+/* 退回原因输入框 */
+.doc-reject-input {
+    padding: 4px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    width: 160px;
+    transition: border-color var(--transition-fast);
+}
+
+.doc-reject-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+}
+
+/* 文档审批进度汇总 */
+.doc-review-progress {
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--color-bg-light);
+    border-radius: var(--radius-md);
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+    margin-top: var(--spacing-sm);
+}
+
+.doc-progress-rejected {
+    color: #C62828;
+}
+
+.doc-progress-pending {
+    color: #E65100;
+}
+
+/* 批量审批提示 */
+.doc-batch-hint {
     display: flex;
     align-items: center;
     gap: var(--spacing-sm);
@@ -995,6 +1163,98 @@
 </style>
 
 <script>
+/**
+ * ============================================
+ * 逐文档审批功能
+ * 管理员可对每个文档单独进行通过/驳回操作。
+ * 通过调用 POST /admin/api/documents/<doc_id>/review 端点。
+ * ============================================
+ */
+
+/**
+ * 逐文档审批：通过或退回单个文档
+ * @param {number} docId - 文档 ID
+ * @param {string} action - 'approve' 或 'reject'
+ */
+function reviewDocument(docId, action) {
+    // 退回操作需要填写原因
+    var comment = '';
+    if (action === 'reject') {
+        var input = document.getElementById('reject-comment-' + docId);
+        comment = input ? input.value : '';
+        if (!comment.trim()) {
+            // 显示输入框（如果尚未显示）
+            if (input) {
+                input.style.display = 'inline-block';
+                input.focus();
+            }
+            return; // 等待用户输入原因后再次点击
+        }
+    }
+
+    // 禁用该文档的操作按钮防止重复提交
+    var itemEl = document.getElementById('doc-item-' + docId);
+    var btns = itemEl ? itemEl.querySelectorAll('.btn-doc-review') : [];
+    btns.forEach(function(b) { b.disabled = true; });
+
+    fetch('/admin/api/documents/' + docId + '/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action, comment: comment })
+    })
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+        if (data.success) {
+            showToast('文档已' + (action === 'approve' ? '审核通过' : '退回'), 'success');
+            setTimeout(function() {
+                window.location.reload();
+            }, 800);
+        } else {
+            alert('操作失败: ' + (data.message || '未知错误'));
+            btns.forEach(function(b) { b.disabled = false; });
+        }
+    })
+    .catch(function(error) {
+        console.error('文档审批请求失败:', error);
+        alert('操作失败，请检查网络连接后重试');
+        btns.forEach(function(b) { b.disabled = false; });
+    });
+}
+
+/**
+ * 退回按钮点击时：显示/隐藏退回原因输入框
+ */
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.btn-doc-review').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var docId = this.dataset.docId;
+            var action = this.dataset.action;
+
+            if (action === 'reject') {
+                // 显示退回原因输入框
+                var input = document.getElementById('reject-comment-' + docId);
+                if (input) {
+                    if (input.style.display === 'none' || input.style.display === '') {
+                        input.style.display = 'inline-block';
+                        input.focus();
+                        return; // 第一次点击：显示输入框
+                    }
+                    // 输入框已显示且有内容，执行退回
+                    if (!input.value.trim()) {
+                        input.focus();
+                        return;
+                    }
+                }
+                reviewDocument(docId, action);
+            } else {
+                // 通过操作需要确认
+                if (!confirm('确认审核通过此文档？')) return;
+                reviewDocument(docId, action);
+            }
+        });
+    });
+});
+
 /**
  * 提交审批操作（统一步骤级审批流程）
  * 用于 two_level 和 one_level 审批类型

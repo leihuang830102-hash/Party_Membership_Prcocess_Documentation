@@ -246,6 +246,7 @@ class TestSecretaryWorkflow:
         """书记可以查看申请人列表"""
         login_user(page, TEST_SECRETARY['username'], TEST_SECRETARY['password'])
         page.goto(f"{BASE_URL}/secretary/applicants")
+        page.wait_for_load_state("networkidle")
         expect(page.locator('#applicantsList')).to_be_visible()
         logout_user(page)
 

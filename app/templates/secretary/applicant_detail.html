@@ -45,7 +45,7 @@
                 </div>
                 <div class="info-item">
                     <span class="info-label">当前阶段</span>
-                    <span class="info-value">第{{ application.current_stage }}阶段</span>
+                    <span class="info-value">{% set sn = {1:'入党申请阶段',2:'入党积极分子阶段',3:'发展对象阶段',4:'预备党员接收阶段',5:'预备党员考察和转正阶段'} %}{{ sn.get(application.current_stage, '第'+application.current_stage|string+'阶段') }}</span>
                 </div>
                 <div class="info-item">
                     <span class="info-label">当前步骤</span>
@@ -122,7 +122,7 @@
                         {% endif %}
                         <div class="stage-group" data-stage="{{ step.stage }}">
                         <div class="stage-header" onclick="toggleStage(this)">
-                            <span class="stage-label">第{{ step.stage }}阶段</span>
+                            <span class="stage-label">{% set sn = {1:'入党申请阶段',2:'入党积极分子阶段',3:'发展对象阶段',4:'预备党员接收阶段',5:'预备党员考察和转正阶段'} %}{{ sn.get(step.stage, '第'+step.stage|string+'阶段') }}</span>
                             <svg class="stage-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
                                 <polyline points="6 9 12 15 18 9"></polyline>
                             </svg>
@@ -261,29 +261,27 @@
     </div>
 
     {# ============================================
-       四、相关文档列表（只读展示）
-       文档审核已统一到步骤级审批，不再提供单独的文档审批按钮。
-       文档状态仅作展示参考，实际审批通过上方时间线中的步骤操作完成。
+       四、相关文档列表
+       two_level 步骤：书记可逐个审核文档（通过/退回）
+       one_level 步骤：书记是提交者，文档仅供查看
+       none 步骤：文档仅供查看
        ============================================ #}
     <div class="card card-decorated mb-lg">
         <div class="card-header">
             <h3 class="card-title">相关文档</h3>
         </div>
         <div class="card-body">
-            {# 提示信息：文档仅供查看，审批在步骤级别完成 #}
-            <div class="doc-readonly-hint">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="flex-shrink:0;">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="12" y1="16" x2="12" y2="12"></line>
-                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                </svg>
-                <span>文档审核已统一到步骤级审批，请通过上方时间线中的步骤操作进行审批</span>
-            </div>
-
             {% if documents and documents|length > 0 %}
             <div class="documents-list">
                 {% for doc in documents %}
-                <div class="document-item">
+                {# 判断文档所属步骤的审批类型 #}
+                {% set doc_step_approval_type = doc_step_approval_types.get(doc.step_code, 'two_level') if doc_step_approval_types is defined else 'two_level' %}
+                {# 判断当前步骤的 StepRecord 是否处于 pending 状态 #}
+                {% set doc_step_record_status = doc_step_record_statuses.get(doc.step_code, 'not_started') if doc_step_record_statuses is defined else 'not_started' %}
+                {# 是否显示审核按钮：two_level + pending文档 + StepRecord未到secretary_approved #}
+                {% set can_review_doc = (doc_step_approval_type == 'two_level' and doc.review_status == 'pending' and doc_step_record_status in ('pending', 'not_started', 'failed')) %}
+
+                <div class="document-item" id="doc-item-{{ doc.id }}">
                     <div class="doc-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
                             <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
@@ -292,21 +290,40 @@
                     <div class="doc-info">
                         <span class="doc-name">{{ doc.original_filename or doc.filename }}</span>
                         <span class="doc-meta">{{ doc.step_code }} | {{ doc.uploaded_at|cn_time }}</span>
+                        {# 退回原因显示（如有） #}
+                        {% if doc.review_comment and doc.review_status in ('secretary_rejected', 'admin_rejected') %}
+                        <span class="doc-review-comment" title="{{ doc.review_comment }}">退回原因: {{ doc.review_comment }}</span>
+                        {% endif %}
                     </div>
-                    {# 文档审核状态徽章（只读展示，无操作按钮） #}
+                    {# 文档审核状态徽章 + 操作按钮 #}
                     <div class="doc-review-status">
                         {% if doc.review_status == 'admin_approved' %}
                         <span class="badge badge-success">最终通过</span>
                         {% elif doc.review_status == 'secretary_approved' %}
-                        <span class="badge badge-info">书记已审待上级</span>
+                        <span class="badge badge-info">已审核</span>
                         {% elif doc.review_status == 'secretary_rejected' %}
-                        <span class="badge badge-danger">书记已驳回</span>
+                        <span class="badge badge-danger">已退回</span>
                         {% elif doc.review_status == 'admin_rejected' %}
                         <span class="badge badge-danger">管理员已驳回</span>
+                        {% elif can_review_doc %}
+                        {# 待审核 + two_level 步骤 -> 显示审核按钮 #}
+                        <div class="doc-review-actions">
+                            <button class="btn btn-sm btn-success" onclick="reviewDocument({{ doc.id }}, 'approve')">通过</button>
+                            <button class="btn btn-sm btn-danger" onclick="toggleRejectForm({{ doc.id }})">退回</button>
+                        </div>
                         {% else %}
                         <span class="badge badge-warning">待审核</span>
                         {% endif %}
                     </div>
+                    {# 退回原因输入框（默认隐藏，点击退回按钮时显示） #}
+                    {% if can_review_doc or doc.review_status == 'pending' %}
+                    <div class="doc-reject-form" id="reject-form-{{ doc.id }}" style="display:none;">
+                        <input type="text" id="reject-comment-{{ doc.id }}" class="form-control form-control-sm"
+                               placeholder="输入退回原因...">
+                        <button class="btn btn-sm btn-danger" onclick="reviewDocument({{ doc.id }}, 'reject')">确认退回</button>
+                        <button class="btn btn-sm btn-secondary" onclick="hideRejectForm({{ doc.id }})">取消</button>
+                    </div>
+                    {% endif %}
                 </div>
                 {% endfor %}
             </div>
@@ -644,6 +661,7 @@
     padding: var(--spacing-sm) var(--spacing-md);
     background: var(--color-bg-light);
     border-radius: var(--radius-md);
+    flex-wrap: wrap;
 }
 
 .doc-icon {
@@ -694,6 +712,22 @@
     display: flex;
     gap: 4px;
     flex-shrink: 0;
+}
+
+/* 文档退回原因输入表单 */
+.doc-reject-form {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    width: 100%;
+    padding-top: var(--spacing-xs);
+}
+
+.doc-reject-form .form-control-sm {
+    flex: 1;
+    min-width: 150px;
+    padding: 4px 8px;
+    font-size: 0.8125rem;
 }
 
 /* 文档只读提示 */
@@ -850,6 +884,84 @@ document.querySelectorAll('.btn-approve-step').forEach(function(btn) {
  * 原有的 /secretary/api/documents/<id>/review 端点已弃用。
  * 文档审批现在通过上方的步骤级审批按钮完成。
  */
+
+/**
+ * 逐文档审核功能（已恢复）
+ * 允许书记对 two_level 步骤的单个文档进行通过/退回操作
+ */
+
+/**
+ * 切换退回原因输入框的显示
+ */
+function toggleRejectForm(docId) {
+    var form = document.getElementById('reject-form-' + docId);
+    if (form) {
+        form.style.display = form.style.display === 'none' ? 'flex' : 'none';
+        if (form.style.display === 'flex') {
+            document.getElementById('reject-comment-' + docId).focus();
+        }
+    }
+}
+
+/**
+ * 隐藏退回原因输入框
+ */
+function hideRejectForm(docId) {
+    var form = document.getElementById('reject-form-' + docId);
+    if (form) {
+        form.style.display = 'none';
+        document.getElementById('reject-comment-' + docId).value = '';
+    }
+}
+
+/**
+ * 审核单个文档（通过或退回）
+ * @param {number} docId - 文档ID
+ * @param {string} action - 'approve' 或 'reject'
+ */
+function reviewDocument(docId, action) {
+    var comment = '';
+    if (action === 'reject') {
+        var commentEl = document.getElementById('reject-comment-' + docId);
+        comment = commentEl ? commentEl.value : '';
+        if (!comment.trim()) {
+            alert('请输入退回原因');
+            return;
+        }
+    } else {
+        if (!confirm('确认通过该文档？')) return;
+    }
+
+    // 禁用该文档的操作按钮防止重复点击
+    var docItem = document.getElementById('doc-item-' + docId);
+    var btns = docItem ? docItem.querySelectorAll('button') : [];
+    btns.forEach(function(b) { b.disabled = true; });
+
+    fetch('/secretary/api/documents/' + docId + '/review', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: action, comment: comment})
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+        if (data.success) {
+            // 如果步骤状态发生变化（所有文档都已审核），刷新页面
+            if (data.data && data.data.step_status) {
+                location.reload();
+            } else {
+                // 仅更新该文档的显示状态
+                location.reload();
+            }
+        } else {
+            alert(data.message || '操作失败');
+            btns.forEach(function(b) { b.disabled = false; });
+        }
+    })
+    .catch(function(error) {
+        alert('网络错误，请重试');
+        btns.forEach(function(b) { b.disabled = false; });
+    });
+}
 
 /**
  * 步骤文件上传（Submitter 模式） - 书记作为提交者上传文档

@@ -4,17 +4,8 @@
 {% block content %}
 <div class="documents-page">
     <div class="page-header">
-        <h1 class="page-title">文档查看</h1>
-        <p class="page-subtitle">查看申请人提交的入党文档</p>
-        {# 弃用提示：文档审核已统一到步骤级审批 #}
-        <div class="deprecation-notice">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" style="flex-shrink:0;">
-                <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path>
-                <line x1="12" y1="9" x2="12" y2="13"></line>
-                <line x1="12" y1="17" x2="12.01" y2="17"></line>
-            </svg>
-            <span>文档审核已统一到步骤级审批。单独的文档审核功能已弃用，请通过申请人详情页中的步骤操作进行审批。</span>
-        </div>
+        <h1 class="page-title">文档审核</h1>
+        <p class="page-subtitle">审核申请人提交的入党文档（仅限需要书记审核的步骤）</p>
     </div>
 
     <!-- 筛选区域 -->
@@ -99,18 +90,20 @@
     font-size: 1rem;
 }
 
-/* 弃用提示样式 */
-.deprecation-notice {
+/* 文档退回原因输入表单 */
+.doc-reject-form {
     display: flex;
+    gap: 4px;
     align-items: center;
-    gap: var(--spacing-sm);
-    margin-top: var(--spacing-md);
-    padding: var(--spacing-md) var(--spacing-lg);
-    background: rgba(255, 152, 0, 0.08);
-    border: 1px solid rgba(255, 152, 0, 0.25);
-    border-radius: var(--radius-md);
-    font-size: 0.875rem;
-    color: #E65100;
+    width: 100%;
+    padding-top: var(--spacing-xs);
+}
+
+.doc-reject-form .form-control-sm {
+    flex: 1;
+    min-width: 150px;
+    padding: 4px 8px;
+    font-size: 0.8125rem;
 }
 
 /* 筛选卡片 */
@@ -179,6 +172,7 @@
     border-radius: var(--radius-md);
     margin-bottom: var(--spacing-md);
     transition: all var(--transition-fast);
+    flex-wrap: wrap;
 }
 
 .document-card:hover {
@@ -307,8 +301,26 @@ async function loadDocuments() {
 
         if (data.documents && data.documents.length > 0) {
             countEl.textContent = data.documents.length;
-            list.innerHTML = data.documents.map(doc => `
-                <div class="document-card">
+            list.innerHTML = data.documents.map(doc => {
+                // Determine if secretary can review this document
+                var canReview = doc.secretary_role === 'approver' && doc.status === 'pending';
+                var reviewButtons = '';
+                if (canReview) {
+                    reviewButtons = `
+                        <div class="document-actions">
+                            <button class="btn btn-sm btn-success" onclick="reviewDocument(${doc.id}, 'approve')">通过</button>
+                            <button class="btn btn-sm btn-danger" onclick="toggleRejectForm(${doc.id})">退回</button>
+                        </div>
+                        <div class="doc-reject-form" id="reject-form-${doc.id}" style="display:none;">
+                            <input type="text" id="reject-comment-${doc.id}" class="form-control form-control-sm"
+                                   placeholder="输入退回原因...">
+                            <button class="btn btn-sm btn-danger" onclick="reviewDocument(${doc.id}, 'reject')">确认退回</button>
+                            <button class="btn btn-sm btn-secondary" onclick="hideRejectForm(${doc.id})">取消</button>
+                        </div>`;
+                }
+
+                return `
+                <div class="document-card" id="doc-card-${doc.id}">
                     <div class="document-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                             <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
@@ -322,8 +334,9 @@ async function loadDocuments() {
                                 <span class="status-badge status-${getStatusClass(doc.status)}">${getStatusText(doc.status)}</span>
                             </div>
                     </div>
-                </div>
-            `).join('');
+                    ${reviewButtons}
+                </div>`;
+            }).join('');
         } else {
             countEl.textContent = '0';
             list.innerHTML = `
@@ -361,14 +374,81 @@ function getStatusClass(status) {
 }
 
 function viewDocument(id) {
-    // Document viewing is now handled through the step-level approval workflow.
-    // The individual document view route no longer exists.
-    alert('文档查看已整合到步骤审批流程中，请通过申请人详情页面查看文档。');
+    // Navigate to the document's application detail page for full review context
+    // The document review is now available directly on this page via review buttons
+    alert('请直接在当前页面使用审核按钮进行文档审核。');
 }
 
-// 弃用提示：approveDocument 和 rejectDocument 函数已移除。
-// 文档审核已统一到步骤级审批，请通过申请人详情页中的步骤操作进行审批。
-// 原有的 /secretary/api/documents/<id>/review 端点已弃用。
+// 弃用提示已移除 - 文档审核功能已恢复
+// 书记可以对 two_level 步骤的单个文档进行通过/退回操作
+
+/**
+ * 切换退回原因输入框的显示
+ */
+function toggleRejectForm(docId) {
+    var form = document.getElementById('reject-form-' + docId);
+    if (form) {
+        form.style.display = form.style.display === 'none' ? 'flex' : 'none';
+        if (form.style.display === 'flex') {
+            document.getElementById('reject-comment-' + docId).focus();
+        }
+    }
+}
+
+/**
+ * 隐藏退回原因输入框
+ */
+function hideRejectForm(docId) {
+    var form = document.getElementById('reject-form-' + docId);
+    if (form) {
+        form.style.display = 'none';
+        document.getElementById('reject-comment-' + docId).value = '';
+    }
+}
+
+/**
+ * 审核单个文档（通过或退回）
+ * @param {number} docId - 文档ID
+ * @param {string} action - 'approve' 或 'reject'
+ */
+function reviewDocument(docId, action) {
+    var comment = '';
+    if (action === 'reject') {
+        var commentEl = document.getElementById('reject-comment-' + docId);
+        comment = commentEl ? commentEl.value : '';
+        if (!comment.trim()) {
+            alert('请输入退回原因');
+            return;
+        }
+    } else {
+        if (!confirm('确认通过该文档？')) return;
+    }
+
+    // 禁用该文档卡片中的所有按钮防止重复点击
+    var docCard = document.getElementById('doc-card-' + docId);
+    var btns = docCard ? docCard.querySelectorAll('button') : [];
+    btns.forEach(function(b) { b.disabled = true; });
+
+    fetch('/secretary/api/documents/' + docId + '/review', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: action, comment: comment})
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+        if (data.success) {
+            // 刷新页面以更新文档列表状态
+            location.reload();
+        } else {
+            alert(data.message || '操作失败');
+            btns.forEach(function(b) { b.disabled = false; });
+        }
+    })
+    .catch(function(error) {
+        alert('网络错误，请重试');
+        btns.forEach(function(b) { b.disabled = false; });
+    });
+}
 
 // 初始化加载
 document.addEventListener('DOMContentLoaded', loadDocuments);

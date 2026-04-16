@@ -14,6 +14,8 @@ step configuration lookup, permission checks, allowed-action computation,
 step advancement, template retrieval, and human-readable status text.
 """
 
+from datetime import datetime
+
 from flask import current_app
 from app import db
 from app.models import StepDefinition, StepRecord, Document, Template, Application
@@ -386,12 +388,15 @@ def has_required_documents(application_id, step_code):
 def sync_document_statuses(application_id, step_code, review_status):
     """批量更新指定步骤所有文档的审核状态 / Update all documents for a step to the given review_status.
 
-    在统一审批模型中，步骤审批通过/驳回时，该步骤关联的所有文档会自动同步状态。
-    这避免了逐个文档审批的复杂性，实现了"一步操作 = 全部文档"的简化模型。
+    [注意] 此函数仅用于管理批量操作/覆盖场景，不再是主要的文档审批机制。
+    正常的逐个文档审批流程不需要调用此函数。步骤级别审批时应先通过
+    all_documents_approved() 检查所有文档已逐个审批完毕。
 
-    In the unified step-approval model, when a step is approved/rejected,
-    all associated documents are automatically updated to the same status.
-    This simplifies the model: one step action = all documents handled.
+    NOTE: This function is only for administrative batch override operations.
+    It is NOT the primary document review mechanism. The normal per-document
+    review flow does not use this function. Step-level approval should gate
+    on all_documents_approved() to verify documents have been individually
+    reviewed before allowing the step to advance.
 
     Args:
         application_id: 申请记录ID / Application record ID
@@ -411,3 +416,145 @@ def sync_document_statuses(application_id, step_code, review_status):
     for doc in documents:
         doc.review_status = review_status
     return len(documents)
+
+
+def all_documents_approved(step_code, application_id, required_status=None):
+    """检查指定步骤的所有文档是否已达到要求的审核状态 / Check if all documents for a step have reached the required review status.
+
+    在逐个文档审批模型中，步骤级别的审批操作需要先确认所有文档都已
+    被逐个审批通过。此函数用于在步骤级别审批前进行前置检查。
+
+    In the per-document review model, step-level approval requires that every
+    document has been individually reviewed and approved first. This function
+    validates that condition before a step-level action is allowed.
+
+    状态检测逻辑 / Status detection logic:
+    - 若指定 required_status：检查所有文档的 review_status 是否都等于该值
+    - 若未指定（None）：根据步骤的 approval_type 自动推断：
+        - two_level + secretary 调用：要求 secretary_approved
+        - two_level + admin 调用：要求 admin_approved
+        - one_level：要求 admin_approved
+        - none：直接返回 True（自办步骤无需文档审批）
+    - If required_status is given: checks all docs match that exact status
+    - If not given (None): auto-detects based on step's approval_type:
+        - two_level + secretary calling: requires secretary_approved
+        - two_level + admin calling: requires admin_approved
+        - one_level: requires admin_approved
+        - none: returns True immediately (no review needed)
+
+    Args:
+        step_code: 步骤代码，例如 'L1', 'L2' 等 / Step code string
+        application_id: 申请记录ID / Application record ID
+        required_status: 所有文档必须达到的审核状态，为 None 时自动推断
+            可选值: 'secretary_approved', 'admin_approved' 等
+            The status all docs must have (auto-detected if None).
+            Options: 'secretary_approved', 'admin_approved', etc.
+
+    Returns:
+        tuple: (bool, str)
+            - bool: True 表示所有文档已达到要求状态，False 表示未达到
+            - str: 状态描述信息，说明检查结果或未通过的原因
+            - (all_approved, status_message)
+    """
+    step_def = StepDefinition.query.filter_by(step_code=step_code).first()
+    docs = Document.query.filter_by(
+        step_code=step_code,
+        application_id=application_id
+    ).all()
+
+    # 没有文档：无法审批
+    if not docs:
+        return False, "没有文档，请先上传"
+
+    # 如果未指定 required_status，根据审批类型自动推断
+    if required_status is None:
+        if not step_def:
+            return False, "未找到步骤定义"
+        approval_type = step_def.approval_type
+        if approval_type == 'none':
+            # 自办步骤无需文档审批
+            return True, "自办步骤无需文档审核"
+        elif approval_type == 'two_level':
+            # 两级审批：默认检查最终状态 admin_approved
+            required_status = 'admin_approved'
+        elif approval_type == 'one_level':
+            required_status = 'admin_approved'
+        else:
+            return False, f"未知审批类型: {approval_type}"
+
+    # 检查所有文档是否都达到了要求的状态
+    all_done = all(d.review_status == required_status for d in docs)
+    if all_done:
+        return True, "所有文档已审核通过"
+    else:
+        pending = [d for d in docs if d.review_status != required_status]
+        return False, f"还有 {len(pending)} 个文档未审核通过"
+
+
+def auto_advance_if_all_approved(step_code, application_id):
+    """逐个文档审批后自动检查并推进步骤 / Auto-advance step if all documents are fully approved.
+
+    在每次单个文档审批完成后调用此函数。它会检查该步骤的所有文档
+    是否都已达到最终审批状态（admin_approved）。如果是，自动完成该步骤
+    并推进申请到下一步骤。
+
+    Call this after each individual document review. It checks whether all
+    documents for the step have reached the final approved status (admin_approved).
+    If so, it automatically completes the step and advances the application.
+
+    自动推进逻辑 / Auto-advance logic:
+    - two_level 步骤：所有文档达到 admin_approved 时自动推进
+    - one_level 步骤：所有文档达到 admin_approved 时自动推进
+    - none 步骤：不处理（由 self-service 接口管理）
+    - 仅在步骤记录尚未完成时才执行推进
+
+    Returns:
+        bool: True 表示步骤已自动推进，False 表示条件未满足（还有文档未审批）
+              True if step was auto-advanced, False if conditions not met
+    """
+    step_def = StepDefinition.query.filter_by(step_code=step_code).first()
+    docs = Document.query.filter_by(
+        step_code=step_code,
+        application_id=application_id
+    ).all()
+
+    # 没有文档或没有步骤定义：无法自动推进
+    if not docs or not step_def:
+        return False
+
+    # none 类型步骤由 self-service 接口管理，不在此处理
+    if step_def.approval_type == 'none':
+        return False
+
+    # 所有审批类型的最终状态都是 admin_approved
+    final_status = 'admin_approved'
+    all_approved = all(d.review_status == final_status for d in docs)
+    if not all_approved:
+        return False
+
+    # 所有文档已审批通过！查找步骤记录并完成步骤
+    step_record = StepRecord.query.filter_by(
+        step_code=step_code,
+        application_id=application_id
+    ).first()
+
+    if not step_record or step_record.status == 'completed':
+        # 步骤记录不存在或已完成：无需重复操作
+        return False
+
+    # 标记步骤完成
+    step_record.status = 'completed'
+    step_record.completed_at = datetime.utcnow()
+
+    # 推进申请到下一步
+    application = Application.query.get(application_id)
+    if application and application.current_step == step_code:
+        advance_step(application, step_code)
+        # 注意：advance_step 内部会 db.session.commit()
+        # 但这里我们在调用方统一 commit，所以先不单独 commit
+        # 实际上 advance_step 会 commit，我们需要确保一致性
+        db.session.commit()
+        return True
+
+    db.session.commit()
+    return True

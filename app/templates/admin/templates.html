@@ -21,11 +21,11 @@
             <div class="filter-box">
                 <select id="stageFilter" class="filter-select">
                     <option value="">全部阶段</option>
-                    <option value="1">第一阶段</option>
-                    <option value="2">第二阶段</option>
-                    <option value="3">第三阶段</option>
-                    <option value="4">第四阶段</option>
-                    <option value="5">第五阶段</option>
+                    <option value="1">入党申请阶段</option>
+                    <option value="2">入党积极分子阶段</option>
+                    <option value="3">发展对象阶段</option>
+                    <option value="4">预备党员接收阶段</option>
+                    <option value="5">预备党员考察和转正阶段</option>
                 </select>
             </div>
         </div>
@@ -63,7 +63,7 @@
                         </svg>
                     </div>
                     <div class="template-stage-badge {% if template.stage %}stage-{{ template.stage }}{% else %}stage-general{% endif %}">
-                        {% if template.stage %}第{{ template.stage }}阶段{% else %}通用模板{% endif %}
+                        {% if template.stage %}{% set stage_labels = {1:'入党申请阶段',2:'入党积极分子阶段',3:'发展对象阶段',4:'预备党员接收阶段',5:'预备党员考察和转正阶段'} %}{{ stage_labels.get(template.stage, '第'+template.stage|string+'阶段') }}{% else %}通用模板{% endif %}
                     </div>
                 </div>
                 <div class="template-body">
@@ -136,11 +136,11 @@
                 <label class="form-label">阶段</label>
                 <select name="stage" id="uploadStage" class="form-control">
                     <option value="">通用模板</option>
-                    <option value="1">第一阶段</option>
-                    <option value="2">第二阶段</option>
-                    <option value="3">第三阶段</option>
-                    <option value="4">第四阶段</option>
-                    <option value="5">第五阶段</option>
+                    <option value="1">入党申请阶段</option>
+                    <option value="2">入党积极分子阶段</option>
+                    <option value="3">发展对象阶段</option>
+                    <option value="4">预备党员接收阶段</option>
+                    <option value="5">预备党员考察和转正阶段</option>
                 </select>
             </div>
             <div class="form-group">

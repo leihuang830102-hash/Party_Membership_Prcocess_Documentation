@@ -45,9 +45,12 @@ class TestApplicantManagement:
         """Test that applicant list displays"""
         page = logged_in_secretary
         page.goto("http://127.0.0.1:5003/secretary/applicants")
+        page.wait_for_load_state("networkidle")
 
         # Check for page content - applicants list container exists
-        expect(page.locator("#applicantsList")).to_be_visible()
+        # The list is loaded asynchronously via JS, so wait for it to populate
+        applicants_list = page.locator("#applicantsList")
+        expect(applicants_list).to_be_visible()
 
 
 class TestDocumentReview:

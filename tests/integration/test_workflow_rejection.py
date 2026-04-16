@@ -20,12 +20,14 @@ class TestSkipStepRejection:
         """书记可以查看申请人详情页"""
         page = logged_in_secretary
         page.goto(f"{BASE_URL}/secretary/applicants")
+        page.wait_for_load_state("networkidle")
         expect(page.locator('#applicantsList')).to_be_visible()
 
     def test_secretary_can_reject_step(self, logged_in_secretary: Page):
         """书记可以驳回步骤"""
         page = logged_in_secretary
         page.goto(f"{BASE_URL}/secretary/applicants")
+        page.wait_for_load_state("networkidle")
         expect(page.locator('#applicantsList')).to_be_visible()
 
     def test_applicant_sees_rejection_status(self, logged_in_applicant: Page):

@@ -53,6 +53,7 @@ class TestSecretaryApprovalFlow:
         """书记可以查看申请人列表"""
         page = logged_in_secretary
         page.goto(f"{BASE_URL}/secretary/applicants")
+        page.wait_for_load_state("networkidle")
         expect(page.locator('#applicantsList')).to_be_visible()
 
     def test_secretary_can_view_documents(self, logged_in_secretary: Page):

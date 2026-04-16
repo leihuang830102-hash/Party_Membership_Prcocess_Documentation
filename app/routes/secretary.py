@@ -15,7 +15,7 @@ from app import db
 # 尝试导入 workflow_helpers 辅助模块（该模块可能尚未创建）
 # 如果模块不存在，使用本地的简化实现
 try:
-    from app.workflow_helpers import can_submit, get_allowed_actions, get_step_config, get_step_templates, has_required_documents, sync_document_statuses
+    from app.workflow_helpers import can_submit, get_allowed_actions, get_step_config, get_step_templates, has_required_documents, sync_document_statuses, all_documents_approved
     _HAS_WORKFLOW_HELPERS = True
 except ImportError:
     _HAS_WORKFLOW_HELPERS = False
@@ -280,6 +280,18 @@ def applicant_detail(id):
         Document.uploaded_at.desc()
     ).all()
 
+    # Build lookup dictionaries for per-document review UI:
+    # - doc_step_approval_types: maps step_code -> approval_type for each document's step
+    # - doc_step_record_statuses: maps step_code -> StepRecord.status for each document's step
+    doc_step_approval_types = {}
+    doc_step_record_statuses = {}
+    for doc in documents:
+        if doc.step_code and doc.step_code not in doc_step_approval_types:
+            sd = StepDefinition.query.filter_by(step_code=doc.step_code).first()
+            doc_step_approval_types[doc.step_code] = getattr(sd, 'approval_type', 'two_level') if sd else 'two_level'
+            sr = StepRecord.query.filter_by(application_id=id, step_code=doc.step_code).first()
+            doc_step_record_statuses[doc.step_code] = sr.status if sr else 'not_started'
+
     # Get current contact person (if assigned)
     contact_person = application.contact_person
 
@@ -301,7 +313,9 @@ def applicant_detail(id):
                          timeline=timeline,
                          documents=documents,
                          contact_person=contact_person,
-                         candidate_contacts=candidate_contacts)
+                         candidate_contacts=candidate_contacts,
+                         doc_step_approval_types=doc_step_approval_types,
+                         doc_step_record_statuses=doc_step_record_statuses)
 
 
 # ==================== API Routes ====================
@@ -514,6 +528,18 @@ def api_approve_step(id):
         db.session.add(step_record)
 
     if action == 'approve':
+        # === 逐个文档审批前置检查：所有文档必须已逐个通过书记审核 ===
+        # Gate check: all documents must have been individually reviewed and
+        # approved by secretary before step-level approval is allowed.
+        all_approved, status_msg = all_documents_approved(
+            step_code, id, required_status='secretary_approved'
+        )
+        if not all_approved:
+            return jsonify({
+                'success': False,
+                'message': f'请先审核所有文档（{status_msg}）'
+            }), 400
+
         # two_level 审批：书记初审通过，设置为 'secretary_approved'
         # 步骤不推进，等待管理员最终审批后才完成
         step_record.status = 'secretary_approved'
@@ -521,17 +547,9 @@ def api_approve_step(id):
         step_record.completed_at = datetime.utcnow()
         step_record.completed_by = current_user.id
 
-        # 统一审批模型：书记审批步骤时，同步更新该步骤所有文档状态
-        # 所有文档（不区分当前状态）统一设置为 secretary_approved
-        sync_document_statuses(id, step_code, 'secretary_approved')
-        # 同时记录审核人和审核时间
-        all_docs = Document.query.filter_by(
-            application_id=id,
-            step_code=step_code
-        ).all()
-        for doc in all_docs:
-            doc.reviewed_by = current_user.id
-            doc.reviewed_at = datetime.utcnow()
+        # 注意：文档已经是 secretary_approved 状态（通过逐个审批完成），
+        # 无需再调用 sync_document_statuses() 批量更新。
+        # 保留 sync_document_statuses 仅作为管理覆盖用。
 
         # 注意：不推进 application.current_step，等待管理员最终审批
 
@@ -952,27 +970,20 @@ def api_get_documents():
 @secretary_required
 def api_review_document(id):
     """
-    [已废弃 / DEPRECATED] 请使用步骤级别审批接口 approve-step 代替。
+    Per-document review endpoint for secretary (restored).
 
-    此端点已废弃，将在未来版本中移除。新代码应使用步骤级别审批接口
-    POST /secretary/api/applicants/<id>/approve-step，该接口在审批步骤时
-    自动同步处理所有关联文档的审核状态。
+    Allows the secretary to review individual documents for two_level steps.
+    After reviewing each document, the system checks whether ALL documents for
+    the same step have been reviewed, and auto-updates the StepRecord status:
+      - If all docs are secretary_approved -> StepRecord.status = 'secretary_approved'
+      - If any doc is secretary_rejected -> StepRecord.status = 'failed'
 
-    保留此端点仅为向后兼容，功能不受影响。
-
-    ---
-    Original docstring (for reference):
-    Review a document (approve or reject).
-    Updates the Document's review_status, reviewed_by, reviewed_at, review_comment,
-    and also updates the linked StepRecord if the document has a step_code.
-
-    For two_level steps: secretary approve sets document to 'secretary_approved' (waits for admin).
-    Step does NOT advance — only admin final approval advances the step.
-    For one_level steps: this endpoint should not be called (secretary is submitter, not reviewer).
+    For one_level steps, returns 403 (secretary is the submitter, not reviewer).
+    For none steps, returns 403 (admin-only, secretary has no role).
 
     Request body:
     - action: 'approve' or 'reject'
-    - comment: optional review comment
+    - comment: optional review comment (recommended for rejections)
     """
     document = Document.query.get_or_404(id)
 
@@ -997,48 +1008,85 @@ def api_review_document(id):
         return jsonify({
             'success': False,
             'message': '该文档属于书记提交步骤，由管理员审批'
+        }), 403
+
+    # 对于 none 步骤，书记无角色
+    if approval_type == 'none':
+        return jsonify({
+            'success': False,
+            'message': '该步骤为管理员专用，书记无权审核'
+        }), 403
+
+    # 检查文档是否已被审核过（避免重复审核）
+    if document.review_status in ('secretary_approved', 'secretary_rejected'):
+        return jsonify({
+            'success': False,
+            'message': f'该文档已审核（当前状态: {document.review_status}），不能重复操作'
         }), 400
 
-    # Update Document's own review status using two-level status values.
-    # Secretary approve: pending -> secretary_approved (waits for admin review)
-    # Secretary reject: pending -> secretary_rejected (applicant can delete & resubmit)
-    # Also handles re-review after admin rejection:
-    #   admin_rejected -> secretary_approved (re-submitted to admin)
+    # === 更新文档的审核状态 ===
     document.review_status = 'secretary_approved' if action == 'approve' else 'secretary_rejected'
     document.reviewed_by = current_user.id
     document.reviewed_at = datetime.utcnow()
     document.review_comment = comment if comment else None
 
-    # If document is linked to a step, also update the step record
+    # === 检查同一步骤的所有文档状态，自动更新 StepRecord ===
     if document.step_code:
         step_record = StepRecord.query.filter_by(
             application_id=application.id,
             step_code=document.step_code
         ).first()
 
-        if step_record:
-            if action == 'reject':
+        # 获取该步骤的所有文档
+        all_step_docs = Document.query.filter_by(
+            application_id=application.id,
+            step_code=document.step_code
+        ).all()
+
+        if action == 'reject':
+            # 任一文档被驳回 -> StepRecord 标记为 failed，申请人/提交者可重新上传
+            if step_record:
                 step_record.status = 'failed'
                 step_record.result = f'文档审核不通过: {comment}' if comment else '文档审核不通过'
-            else:
-                # two_level 审批：书记审核通过，设置为 secretary_approved
-                # 步骤不推进，等待管理员最终审批
+        else:
+            # 文档通过 -> 检查是否所有文档都已 secretary_approved
+            all_approved = all(
+                doc.review_status == 'secretary_approved'
+                for doc in all_step_docs
+            )
+            if all_approved:
+                # 所有文档都已通过书记审核 -> 更新 StepRecord 为 secretary_approved
+                if not step_record:
+                    step_record = StepRecord(
+                        application_id=application.id,
+                        step_code=document.step_code,
+                        status='pending'
+                    )
+                    db.session.add(step_record)
                 step_record.status = 'secretary_approved'
-                step_record.result = f'文档初审通过: {comment}' if comment else '文档初审通过'
+                step_record.result = '所有文档初审通过'
                 step_record.completed_at = datetime.utcnow()
                 step_record.completed_by = current_user.id
-
                 # 注意：不推进 application.current_step，等待管理员最终审批
-                # 管理员审批通过后才推进到下一步
 
     db.session.commit()
+
+    # 构建响应：返回文档状态和步骤整体状态
+    step_record_status = None
+    if document.step_code:
+        sr = StepRecord.query.filter_by(
+            application_id=application.id,
+            step_code=document.step_code
+        ).first()
+        step_record_status = sr.status if sr else None
 
     return jsonify({
         'success': True,
         'message': '文档已审核通过' if action == 'approve' else '文档已驳回',
         'data': {
             'document_id': id,
-            'review_status': document.review_status
+            'review_status': document.review_status,
+            'step_status': step_record_status
         }
     })
 

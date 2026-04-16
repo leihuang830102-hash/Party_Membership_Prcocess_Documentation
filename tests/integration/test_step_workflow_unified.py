@@ -307,6 +307,82 @@ def api_admin_upload_self_service(page: Page, app_id: int, step_code: str,
     return {"status": response.status, "body": response.json()}
 
 
+def api_secretary_review_document(page: Page, doc_id: int,
+                                  action: str = "approve", comment: str = "") -> dict:
+    """Secretary reviews a single document via per-document review endpoint.
+
+    Used for two_level steps where the secretary must individually approve
+    each document before step-level approval is possible.
+
+    Args:
+        doc_id: The document ID.
+        action: 'approve' or 'reject'.
+        comment: Optional review comment.
+
+    Returns:
+        Response dict with status and body.
+    """
+    response = page.request.post(
+        f"{BASE_URL}/secretary/api/documents/{doc_id}/review",
+        data=json.dumps({"action": action, "comment": comment}),
+        headers={"Content-Type": "application/json"},
+    )
+    return {"status": response.status, "body": response.json()}
+
+
+def api_admin_review_document(page: Page, doc_id: int,
+                               action: str = "approve", comment: str = "") -> dict:
+    """Admin reviews a single document via per-document review endpoint.
+
+    Works for both two_level (after secretary approval) and one_level steps.
+    When the last document is approved, the step auto-advances.
+
+    Args:
+        doc_id: The document ID.
+        action: 'approve' or 'reject'.
+        comment: Optional review comment.
+
+    Returns:
+        Response dict with status and body.
+    """
+    response = page.request.post(
+        f"{BASE_URL}/admin/api/documents/{doc_id}/review",
+        data=json.dumps({"action": action, "comment": comment}),
+        headers={"Content-Type": "application/json"},
+    )
+    return {"status": response.status, "body": response.json()}
+
+
+def api_get_documents_for_step(page: Page, app_id: int, step_code: str,
+                               role: str = "secretary") -> list:
+    """Get document IDs for a specific step of an application.
+
+    Queries documents via the appropriate API based on role.
+
+    Args:
+        page: The Playwright page (logged in as appropriate role).
+        app_id: The application ID.
+        step_code: The step code to filter for.
+        role: 'secretary' or 'admin' -- determines which API to use.
+
+    Returns:
+        List of document dicts with at least 'id' and 'review_status' fields.
+    """
+    if role == "secretary":
+        response = page.request.get(f"{BASE_URL}/secretary/api/documents")
+        if response.status == 200:
+            docs = response.json().get("documents", [])
+            return [d for d in docs if d.get("step_code") == step_code]
+    elif role == "admin":
+        # Admin can use the applicant detail or documents API
+        # Use the secretary API through admin for now
+        response = page.request.get(f"{BASE_URL}/admin/api/documents")
+        if response.status == 200:
+            docs = response.json().get("documents", [])
+            return [d for d in docs if d.get("step_code") == step_code]
+    return []
+
+
 def api_get_applicant_detail(page: Page, applicant_id: int) -> dict:
     """Secretary gets applicant detail including step records.
 
@@ -344,11 +420,13 @@ def advance_application_to_step(page: Page, app_id: int, target_step: str) -> in
     Returns:
         The application ID.
 
-    Workflow per step type:
+    Workflow per step type (updated for per-document review model):
       - two_level (applicant/secretary/admin):
-            Applicant uploads file, secretary approves, admin approves
+            Applicant uploads file -> Secretary per-document approves -> Admin per-document approves
+            (step auto-advances when last document is admin_approved)
       - one_level (secretary/admin):
-            Secretary uploads file + submits, admin approves
+            Secretary uploads file + submits -> Admin per-document approves
+            (step auto-advances when last document is admin_approved)
       - none (admin):
             Admin uploads file + confirms
 
@@ -418,26 +496,37 @@ def advance_application_to_step(page: Page, app_id: int, target_step: str) -> in
                     f"Applicant upload failed for {step_code}: {upload_result}"
                 logout_user(page)
 
-                # Step 2: Secretary approves (L1 approval)
+                # Step 2: Secretary per-document approves ALL documents for this step
                 login_user(page, TEST_SECRETARY["username"])
-                approve_result = api_secretary_approve_step(
-                    page, app_id, step_code, action="approve"
-                )
-                assert approve_result["status"] == 200, \
-                    f"Secretary approve failed for {step_code}: {approve_result}"
-                assert approve_result["body"]["data"]["status"] == "secretary_approved", \
-                    f"Expected secretary_approved for {step_code}, got {approve_result['body']}"
+                detail = api_get_applicant_detail(page, app_id)
+                docs = detail["body"].get("data", {}).get("documents", [])
+                step_docs = [d for d in docs if d.get("step_code") == step_code]
+                for doc in step_docs:
+                    doc_review_result = api_secretary_review_document(
+                        page, doc["id"], action="approve"
+                    )
+                    assert doc_review_result["status"] == 200, \
+                        f"Secretary doc review failed for {step_code} doc {doc['id']}: {doc_review_result}"
                 logout_user(page)
 
-                # Step 3: Admin approves (final)
+                # Step 3: Admin per-document approves ALL documents (auto-advances step)
                 login_user(page, TEST_ADMIN["username"])
-                admin_result = api_admin_approve_step(
-                    page, app_id, step_code, action="approve"
-                )
-                assert admin_result["status"] == 200, \
-                    f"Admin approve failed for {step_code}: {admin_result}"
-                assert admin_result["body"]["data"]["status"] == "completed", \
-                    f"Expected completed for {step_code}, got {admin_result['body']}"
+                # Re-fetch documents as secretary to get updated IDs
+                logout_user(page)
+                login_user(page, TEST_SECRETARY["username"])
+                detail2 = api_get_applicant_detail(page, app_id)
+                docs2 = detail2["body"].get("data", {}).get("documents", [])
+                step_docs2 = [d for d in docs2 if d.get("step_code") == step_code]
+                doc_ids = [d["id"] for d in step_docs2]
+                logout_user(page)
+
+                login_user(page, TEST_ADMIN["username"])
+                for doc_id in doc_ids:
+                    admin_doc_result = api_admin_review_document(
+                        page, doc_id, action="approve"
+                    )
+                    assert admin_doc_result["status"] == 200, \
+                        f"Admin doc review failed for {step_code} doc {doc_id}: {admin_doc_result}"
                 logout_user(page)
 
             elif approval_type == "one_level":
@@ -450,15 +539,22 @@ def advance_application_to_step(page: Page, app_id: int, target_step: str) -> in
                     f"Secretary submit failed for {step_code}: {submit_result}"
                 logout_user(page)
 
-                # Step 2: Admin approves
+                # Step 2: Admin per-document approves ALL documents (auto-advances step)
+                # Get all documents for this step via secretary
+                login_user(page, TEST_SECRETARY["username"])
+                detail = api_get_applicant_detail(page, app_id)
+                docs = detail["body"].get("data", {}).get("documents", [])
+                step_docs = [d for d in docs if d.get("step_code") == step_code]
+                doc_ids = [d["id"] for d in step_docs]
+                logout_user(page)
+
                 login_user(page, TEST_ADMIN["username"])
-                admin_result = api_admin_approve_step(
-                    page, app_id, step_code, action="approve"
-                )
-                assert admin_result["status"] == 200, \
-                    f"Admin approve failed for {step_code}: {admin_result}"
-                assert admin_result["body"]["data"]["status"] == "completed", \
-                    f"Expected completed for {step_code}, got {admin_result['body']}"
+                for doc_id in doc_ids:
+                    admin_doc_result = api_admin_review_document(
+                        page, doc_id, action="approve"
+                    )
+                    assert admin_doc_result["status"] == 200, \
+                        f"Admin doc review failed for {step_code} doc {doc_id}: {admin_doc_result}"
                 logout_user(page)
 
             elif approval_type == "none":
@@ -719,9 +815,10 @@ class TestTwoLevelApprovalFlow:
         logout_user(page)
 
     def test_03_secretary_approves_l1_step(self, page: Page):
-        """Secretary approves the L1 step (two_level L1 approval).
+        """Secretary per-document approves L1 documents (two_level L1 approval).
 
-        After secretary approval, step status should be 'secretary_approved'
+        After secretary per-document approval, document review_status should be
+        'secretary_approved' and step status should become 'secretary_approved'
         but the step should NOT advance -- it waits for admin final approval.
         """
         login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
@@ -740,22 +837,31 @@ class TestTwoLevelApprovalFlow:
 
         assert app_id is not None, "Test applicant not found in secretary's applicant list"
 
-        # Secretary approves L1 step
-        result = api_secretary_approve_step(page, app_id, "L1", action="approve")
-        assert result["status"] == 200, \
-            f"Secretary approve failed: {result}"
-        body = result["body"]
-        assert body.get("success") is True, f"Approve not successful: {body}"
+        # Get documents for this application via secretary's applicant detail API
+        detail = api_get_applicant_detail(page, app_id)
+        assert detail["status"] == 200
+        docs = detail["body"].get("data", {}).get("documents", [])
+        l1_docs = [d for d in docs if d.get("step_code") == "L1"]
+        assert len(l1_docs) > 0, "No L1 documents found to approve"
 
-        # Verify step status is secretary_approved (NOT completed)
-        data = body.get("data", {})
-        assert data.get("status") == "secretary_approved", \
-            f"Expected secretary_approved, got {data.get('status')}"
-        # Step should NOT have advanced
-        assert data.get("needs_admin_approval") is True, \
-            "Expected needs_admin_approval=True after secretary approval"
-        assert data.get("current_step") == "L1", \
-            f"Step should still be L1, got {data.get('current_step')}"
+        # Secretary per-document approves each L1 document
+        for doc in l1_docs:
+            result = api_secretary_review_document(page, doc["id"], action="approve")
+            assert result["status"] == 200, \
+                f"Secretary doc review failed for doc {doc['id']}: {result}"
+            body = result["body"]
+            assert body.get("success") is True, f"Review not successful: {body}"
+            # Verify document-level status
+            assert body["data"]["review_status"] == "secretary_approved", \
+                f"Expected secretary_approved, got {body['data']['review_status']}"
+
+        # Verify step-level status is now secretary_approved
+        detail2 = api_get_applicant_detail(page, app_id)
+        steps = detail2["body"].get("data", {}).get("step_records", [])
+        l1_step = [s for s in steps if s.get("step_code") == "L1"]
+        if l1_step:
+            assert l1_step[0].get("status") == "secretary_approved", \
+                f"Expected step status secretary_approved, got {l1_step[0].get('status')}"
 
         logout_user(page)
 
@@ -776,23 +882,12 @@ class TestTwoLevelApprovalFlow:
         logout_user(page)
 
     def test_05_admin_approves_l1_step(self, page: Page):
-        """Admin approves the L1 step (final approval for two_level).
+        """Admin per-document approves L1 documents (final approval for two_level).
 
-        After admin approval, the step should be completed and the
-        application should advance to L2.
+        After admin per-document approval of all documents, the step should be
+        completed and the application should advance to L2.
         """
-        login_user(page, TEST_ADMIN["username"], TEST_ADMIN["password"])
-
-        # Find the application ID
-        response = page.request.get(f"{BASE_URL}/admin/api/users")
-        assert response.status == 200
-        users = response.json().get("users", [])
-
-        # We need the application ID, not the user ID
-        # Use the admin approvals page or secretary API to find it
-        logout_user(page)
-
-        # Log in as secretary to get the application ID
+        # Log in as secretary to get the application ID and document IDs
         login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
         response = page.request.get(f"{BASE_URL}/secretary/api/applicants")
         applicants = response.json().get("applicants", [])
@@ -802,25 +897,34 @@ class TestTwoLevelApprovalFlow:
                 app_id = a["id"]
                 break
         assert app_id is not None
+
+        # Get documents that have been secretary_approved (ready for admin review)
+        detail = api_get_applicant_detail(page, app_id)
+        docs = detail["body"].get("data", {}).get("documents", [])
+        l1_docs = [d for d in docs if d.get("step_code") == "L1"]
+        assert len(l1_docs) > 0, "No L1 documents found"
+        l1_doc_ids = [d["id"] for d in l1_docs]
         logout_user(page)
 
-        # Now log in as admin and approve the step
+        # Now log in as admin and per-document approve each L1 document
         login_user(page, TEST_ADMIN["username"], TEST_ADMIN["password"])
 
-        result = api_admin_approve_step(page, app_id, "L1", action="approve")
-        assert result["status"] == 200, \
-            f"Admin approve failed: {result}"
-        body = result["body"]
-        assert body.get("success") is True, f"Admin approve not successful: {body}"
+        for doc_id in l1_doc_ids:
+            result = api_admin_review_document(page, doc_id, action="approve")
+            assert result["status"] == 200, \
+                f"Admin doc review failed for doc {doc_id}: {result}"
+            body = result["body"]
+            assert body.get("success") is True, f"Admin review not successful: {body}"
 
-        data = body.get("data", {})
-        assert data.get("status") == "completed", \
-            f"Expected completed, got {data.get('status')}"
-
-        # Verify next step is L2
-        next_step = data.get("next_step", {})
-        assert next_step.get("step_code") == "L2", \
-            f"Expected next step L2, got {next_step}"
+        # Verify the step has advanced (auto-advance after last doc approved)
+        # Log in as applicant to check
+        logout_user(page)
+        login_user(page, TEST_APPLICANT["username"], TEST_APPLICANT["password"])
+        progress = api_get_applicant_progress(page)
+        data = progress["body"].get("data", {})
+        # Should have advanced to L2
+        assert data.get("current_step") == "L2", \
+            f"Expected current_step L2 after admin doc review, got {data.get('current_step')}"
 
         logout_user(page)
 
@@ -889,9 +993,9 @@ class TestOneLevelApprovalFlow:
         logout_user(page)
 
     def test_02_admin_approves_l2_step(self, page: Page):
-        """Admin approves L2 step (one_level final approval).
+        """Admin per-document approves L2 documents (one_level final approval).
 
-        After admin approval, step should advance to L3.
+        After admin per-document approval of all documents, step should advance to L3.
         """
         login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
 
@@ -904,22 +1008,24 @@ class TestOneLevelApprovalFlow:
                 app_id = a["id"]
                 break
         assert app_id is not None
+
+        # Get L2 documents via secretary's applicant detail API
+        detail = api_get_applicant_detail(page, app_id)
+        assert detail["status"] == 200
+        docs = detail["body"].get("data", {}).get("documents", [])
+        l2_docs = [d for d in docs if d.get("step_code") == "L2"]
+        assert len(l2_docs) > 0, "No L2 documents found"
+        l2_doc_ids = [d["id"] for d in l2_docs]
         logout_user(page)
 
-        # Admin approves L2
+        # Admin per-document approves each L2 document
         login_user(page, TEST_ADMIN["username"], TEST_ADMIN["password"])
-        result = api_admin_approve_step(page, app_id, "L2", action="approve")
-        assert result["status"] == 200, \
-            f"Admin approve failed for L2: {result}"
-        body = result["body"]
-        assert body.get("success") is True, f"Admin approve not successful: {body}"
-
-        data = body.get("data", {})
-        assert data.get("status") == "completed", \
-            f"Expected completed, got {data.get('status')}"
-        next_step = data.get("next_step", {})
-        assert next_step.get("step_code") == "L3", \
-            f"Expected next step L3, got {next_step}"
+        for doc_id in l2_doc_ids:
+            result = api_admin_review_document(page, doc_id, action="approve")
+            assert result["status"] == 200, \
+                f"Admin doc review failed for L2 doc {doc_id}: {result}"
+            body = result["body"]
+            assert body.get("success") is True, f"Admin review not successful: {body}"
 
         logout_user(page)
 
@@ -1057,9 +1163,9 @@ class TestSelfServiceFlow:
         # L1-L12 should all be completed (12 steps)
         assert data.get("completed_steps", 0) >= 12, \
             f"Expected at least 12 completed steps, got {data.get('completed_steps')}"
-        # L13 is in stage 3
-        assert data.get("current_stage") == 3, \
-            f"Expected current_stage 3 (L13 is stage 3), got {data.get('current_stage')}"
+        # L13 is in stage 4 (new mapping: L11-L17 = stage 4)
+        assert data.get("current_stage") == 4, \
+            f"Expected current_stage 4 (L13 is stage 4), got {data.get('current_stage')}"
 
         logout_user(page)
 
@@ -1102,7 +1208,7 @@ class TestRejectionFlow:
         logout_user(page)
 
     def test_02_secretary_rejects_l13(self, page: Page):
-        """Secretary rejects the L13 step."""
+        """Secretary per-document rejects L13 documents."""
         login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
 
         # Get application ID
@@ -1115,21 +1221,24 @@ class TestRejectionFlow:
                 break
         assert app_id is not None
 
-        # Reject L13
-        result = api_secretary_approve_step(
-            page, app_id, "L13", action="reject", result="Test rejection: document incomplete"
-        )
-        assert result["status"] == 200, \
-            f"Secretary reject failed: {result}"
-        body = result["body"]
-        assert body.get("success") is True, f"Reject not successful: {body}"
+        # Get L13 documents via applicant detail
+        detail = api_get_applicant_detail(page, app_id)
+        docs = detail["body"].get("data", {}).get("documents", [])
+        l13_docs = [d for d in docs if d.get("step_code") == "L13"]
+        assert len(l13_docs) > 0, "No L13 documents found to reject"
 
-        data = body.get("data", {})
-        assert data.get("status") == "failed", \
-            f"Expected failed status after rejection, got {data.get('status')}"
-        # Step should NOT have advanced
-        assert data.get("current_step") == "L13", \
-            f"Step should stay at L13 after rejection, got {data.get('current_step')}"
+        # Per-document reject each L13 document
+        for doc in l13_docs:
+            result = api_secretary_review_document(
+                page, doc["id"], action="reject", comment="Test rejection: document incomplete"
+            )
+            assert result["status"] == 200, \
+                f"Secretary doc reject failed for doc {doc['id']}: {result}"
+            body = result["body"]
+            assert body.get("success") is True, f"Reject not successful: {body}"
+            # Document should be secretary_rejected
+            assert body["data"]["review_status"] == "secretary_rejected", \
+                f"Expected secretary_rejected, got {body['data']['review_status']}"
 
         logout_user(page)
 
@@ -1179,7 +1288,7 @@ class TestRejectionFlow:
         logout_user(page)
 
     def test_05_secretary_approves_l13_after_resubmit(self, page: Page):
-        """Secretary approves the re-submitted L13 step."""
+        """Secretary per-document approves the re-submitted L13 documents."""
         login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
 
         # Get application ID
@@ -1192,18 +1301,25 @@ class TestRejectionFlow:
                 break
         assert app_id is not None
 
-        # Approve L13
-        result = api_secretary_approve_step(page, app_id, "L13", action="approve")
-        assert result["status"] == 200, \
-            f"Secretary approve failed for resubmitted L13: {result}"
-        body = result["body"]
-        assert body.get("success") is True
-        assert body["data"]["status"] == "secretary_approved"
+        # Get L13 documents via applicant detail
+        detail = api_get_applicant_detail(page, app_id)
+        docs = detail["body"].get("data", {}).get("documents", [])
+        l13_docs = [d for d in docs if d.get("step_code") == "L13"]
+        assert len(l13_docs) > 0, "No L13 documents found to approve"
+
+        # Per-document approve each L13 document
+        for doc in l13_docs:
+            result = api_secretary_review_document(page, doc["id"], action="approve")
+            assert result["status"] == 200, \
+                f"Secretary doc approve failed for doc {doc['id']}: {result}"
+            body = result["body"]
+            assert body.get("success") is True
+            assert body["data"]["review_status"] == "secretary_approved"
 
         logout_user(page)
 
     def test_06_admin_approves_l13_final(self, page: Page):
-        """Admin approves L13 step, completing the rejection/resubmission cycle."""
+        """Admin per-document approves L13 documents, completing the rejection/resubmission cycle."""
         login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
 
         # Get application ID
@@ -1215,21 +1331,23 @@ class TestRejectionFlow:
                 app_id = a["id"]
                 break
         assert app_id is not None
+
+        # Get L13 documents that are secretary_approved (ready for admin review)
+        detail = api_get_applicant_detail(page, app_id)
+        docs = detail["body"].get("data", {}).get("documents", [])
+        l13_docs = [d for d in docs if d.get("step_code") == "L13"]
+        assert len(l13_docs) > 0, "No L13 documents found"
+        l13_doc_ids = [d["id"] for d in l13_docs]
         logout_user(page)
 
-        # Admin approves
+        # Admin per-document approves each L13 document
         login_user(page, TEST_ADMIN["username"], TEST_ADMIN["password"])
-        result = api_admin_approve_step(page, app_id, "L13", action="approve")
-        assert result["status"] == 200, \
-            f"Admin approve failed for L13: {result}"
-        body = result["body"]
-        assert body.get("success") is True
-
-        data = body.get("data", {})
-        assert data.get("status") == "completed"
-        next_step = data.get("next_step", {})
-        assert next_step.get("step_code") == "L14", \
-            f"Expected next step L14, got {next_step}"
+        for doc_id in l13_doc_ids:
+            result = api_admin_review_document(page, doc_id, action="approve")
+            assert result["status"] == 200, \
+                f"Admin doc review failed for L13 doc {doc_id}: {result}"
+            body = result["body"]
+            assert body.get("success") is True
 
         logout_user(page)
 
@@ -1835,9 +1953,9 @@ class TestSecretaryApprovalState:
             f"Expected L1 after reset, got {current_step}"
 
     def test_secretary_approved_status_in_api(self, page: Page):
-        """After secretary approves a two_level step, step status is 'secretary_approved'.
+        """After secretary per-document approves a two_level step, step status is 'secretary_approved'.
 
-        Self-contained: resets to L1 first, then uploads a doc, secretary approves,
+        Self-contained: resets to L1 first, then uploads a doc, secretary per-document approves,
         and verifies the secretary_approved status.
         """
         # After test_00, we should be at L1
@@ -1869,33 +1987,28 @@ class TestSecretaryApprovalState:
         login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
         app_id = find_test_app_id(page)
         assert app_id is not None, "Test applicant not found"
-        logout_user(page)
 
-        # Secretary approves
-        login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
-        approve_result = api_secretary_approve_step(page, app_id, current_step, action="approve")
-
-        assert approve_result["status"] == 200, \
-            f"Secretary approve failed: {approve_result}"
-        assert approve_result["body"].get("success") is True, \
-            f"Approve not successful: {approve_result['body']}"
-
-        data = approve_result["body"].get("data", {})
-        # Core Bug 5 assertion: status is 'secretary_approved'
-        assert data.get("status") == "secretary_approved", \
-            f"Expected secretary_approved, got {data.get('status')}"
-        # Step should NOT advance
-        assert data.get("current_step") == current_step, \
-            f"Step should stay at {current_step}, got {data.get('current_step')}"
-        # needs_admin_approval flag
-        assert data.get("needs_admin_approval") is True, \
-            "Expected needs_admin_approval=True"
-
-        # Verify applicant detail API includes approval_type in timeline
+        # Get documents for the current step
         detail = api_get_applicant_detail(page, app_id)
-        assert detail["status"] == 200
-        detail_data = detail["body"].get("data", detail["body"])
-        # The step records should contain the step with secretary_approved status
+        docs = detail["body"].get("data", {}).get("documents", [])
+        step_docs = [d for d in docs if d.get("step_code") == current_step]
+        assert len(step_docs) > 0, f"No documents found for {current_step}"
+
+        # Secretary per-document approves each document
+        for doc in step_docs:
+            approve_result = api_secretary_review_document(page, doc["id"], action="approve")
+            assert approve_result["status"] == 200, \
+                f"Secretary doc review failed: {approve_result}"
+            assert approve_result["body"].get("success") is True, \
+                f"Review not successful: {approve_result['body']}"
+            # Verify document-level status
+            assert approve_result["body"]["data"]["review_status"] == "secretary_approved", \
+                f"Expected secretary_approved, got {approve_result['body']['data']['review_status']}"
+
+        # Verify step-level status is secretary_approved in applicant detail
+        detail2 = api_get_applicant_detail(page, app_id)
+        assert detail2["status"] == 200
+        detail_data = detail2["body"].get("data", detail2["body"])
         steps = detail_data.get("steps", detail_data.get("step_records", []))
         secretary_approved_steps = [
             s for s in steps
@@ -1909,7 +2022,7 @@ class TestSecretaryApprovalState:
     def test_secretary_approved_page_renders(self, page: Page):
         """Secretary applicant detail page renders '已通过初审' text for secretary_approved steps.
 
-        Self-contained: resets to L1, uploads doc, secretary approves, then checks page.
+        Self-contained: resets to L1, uploads doc, secretary per-document approves, then checks page.
         """
         # Reset to L1 to guarantee a two_level step
         reset_application_to_l1(page)
@@ -1925,13 +2038,19 @@ class TestSecretaryApprovalState:
                 os.unlink(temp_file)
         logout_user(page)
 
-        # Secretary approves to get secretary_approved state
+        # Secretary per-document approves to get secretary_approved state
         login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
         app_id = find_test_app_id(page)
         assert app_id is not None, "Test applicant not found"
-        approve_result = api_secretary_approve_step(page, app_id, current_step, action="approve")
-        assert approve_result["status"] == 200, \
-            f"Secretary approve failed: {approve_result}"
+
+        # Get documents and per-document approve
+        detail = api_get_applicant_detail(page, app_id)
+        docs = detail["body"].get("data", {}).get("documents", [])
+        step_docs = [d for d in docs if d.get("step_code") == current_step]
+        for doc in step_docs:
+            approve_result = api_secretary_review_document(page, doc["id"], action="approve")
+            assert approve_result["status"] == 200, \
+                f"Secretary doc review failed: {approve_result}"
 
         # Now navigate to the applicant detail page while still logged in as secretary
         page.goto(f"{BASE_URL}/secretary/applicants/{app_id}")
@@ -1951,13 +2070,13 @@ class TestSecretaryApprovalState:
         logout_user(page)
 
     def test_admin_reject_then_secretary_reapprove(self, page: Page):
-        """After admin rejects, secretary can re-approve a two_level step.
+        """After admin per-document rejects, secretary can re-approve documents for a two_level step.
 
         Self-contained: resets to L1, then drives the full rejection cycle:
           1. Applicant uploads doc
-          2. Secretary approves -> secretary_approved
-          3. Admin rejects -> failed
-          4. Secretary re-approves -> secretary_approved again
+          2. Secretary per-document approves -> secretary_approved
+          3. Admin per-document rejects -> admin_rejected
+          4. Applicant re-uploads -> Secretary per-document re-approves -> secretary_approved again
         """
         # Reset to L1 to guarantee a two_level step
         reset_application_to_l1(page)
@@ -1967,49 +2086,328 @@ class TestSecretaryApprovalState:
         login_user(page, TEST_APPLICANT["username"], TEST_APPLICANT["password"])
         temp_file = create_temp_file(b'%PDF-1.4\nBug5 reapprove test doc')
         try:
-            api_upload_document(page, current_step, temp_file)
+            upload_result = api_upload_document(page, current_step, temp_file)
+            assert upload_result["status"] == 200
         finally:
             if os.path.exists(temp_file):
                 os.unlink(temp_file)
         logout_user(page)
 
-        # Find app_id via secretary
+        # Find app_id and doc_id via secretary
         login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
         app_id = find_test_app_id(page)
         assert app_id is not None
+        detail = api_get_applicant_detail(page, app_id)
+        docs = detail["body"].get("data", {}).get("documents", [])
+        step_docs = [d for d in docs if d.get("step_code") == current_step]
+        assert len(step_docs) > 0, "No documents found"
+        doc_id = step_docs[0]["id"]
         logout_user(page)
 
-        # Step 2: Secretary approves
+        # Step 2: Secretary per-document approves
         login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
-        sec_result = api_secretary_approve_step(page, app_id, current_step, action="approve")
+        sec_result = api_secretary_review_document(page, doc_id, action="approve")
         assert sec_result["status"] == 200, \
-            f"Secretary approve failed: {sec_result}"
+            f"Secretary doc review failed: {sec_result}"
         assert sec_result["body"].get("success") is True, \
-            f"Secretary approve not successful: {sec_result['body']}"
+            f"Secretary doc review not successful: {sec_result['body']}"
+        assert sec_result["body"]["data"]["review_status"] == "secretary_approved"
         logout_user(page)
 
-        # Step 3: Admin rejects
+        # Step 3: Admin per-document rejects
         login_user(page, TEST_ADMIN["username"], TEST_ADMIN["password"])
-        admin_reject = api_admin_approve_step(
-            page, app_id, current_step, action="reject", result="Bug5 test rejection"
+        admin_reject = api_admin_review_document(
+            page, doc_id, action="reject", comment="Bug5 test rejection"
         )
         assert admin_reject["status"] == 200, \
-            f"Admin reject failed: {admin_reject}"
+            f"Admin doc reject failed: {admin_reject}"
         assert admin_reject["body"].get("success") is True, \
-            f"Admin reject not successful: {admin_reject['body']}"
-        assert admin_reject["body"]["data"]["status"] == "failed", \
-            f"Expected 'failed' after admin reject, got {admin_reject['body']['data']}"
+            f"Admin doc reject not successful: {admin_reject['body']}"
+        assert admin_reject["body"]["data"]["review_status"] == "admin_rejected", \
+            f"Expected admin_rejected, got {admin_reject['body']['data']}"
         logout_user(page)
 
-        # Step 4: Secretary re-approves
+        # Step 4: Applicant re-uploads and secretary re-approves
+        login_user(page, TEST_APPLICANT["username"], TEST_APPLICANT["password"])
+        temp_file = create_temp_file(b'%PDF-1.4\nBug5 reuploaded doc')
+        try:
+            reupload_result = api_upload_document(page, current_step, temp_file)
+            assert reupload_result["status"] == 200
+            new_doc_id = reupload_result["body"].get("data", {}).get("id")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+        logout_user(page)
+
+        # Secretary per-document re-approves the new document
         login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
-        reapprove_result = api_secretary_approve_step(page, app_id, current_step, action="approve")
+        reapprove_result = api_secretary_review_document(page, new_doc_id, action="approve")
         assert reapprove_result["status"] == 200, \
             f"Secretary re-approve failed: {reapprove_result}"
         body = reapprove_result["body"]
         assert body.get("success") is True, \
             f"Re-approve not successful: {body}"
-        assert body["data"]["status"] == "secretary_approved", \
-            f"Expected secretary_approved after re-approve, got {body['data']['status']}"
+        assert body["data"]["review_status"] == "secretary_approved", \
+            f"Expected secretary_approved after re-approve, got {body['data']['review_status']}"
+
+        logout_user(page)
+
+
+class TestPerDocumentReview:
+    """Test 9: Per-document review workflow.
+
+    Tests the per-document review mechanism where:
+      - Secretary individually approves/rejects documents for two_level steps
+      - Admin individually approves/rejects documents for both two_level and one_level steps
+      - Step-level approval gates on all_documents_approved()
+      - Step auto-advances when the last document is admin_approved
+
+    Self-contained: test_00 resets the application to L1.
+    """
+
+    def test_00_setup_reset_to_l1(self, page: Page):
+        """Reset application to L1 so subsequent tests have a clean two_level step."""
+        app_id = reset_application_to_l1(page)
+        if app_id is None:
+            login_user(page, TEST_APPLICANT["username"], TEST_APPLICANT["password"])
+            result = api_start_application(page)
+            assert result["status"] in [200, 201], \
+                f"Failed to start application: {result}"
+            logout_user(page)
+
+        # Verify we're now at L1
+        login_user(page, TEST_APPLICANT["username"], TEST_APPLICANT["password"])
+        progress = api_get_applicant_progress(page)
+        current_step = progress["body"]["data"]["current_step"]
+        logout_user(page)
+        assert current_step == "L1", \
+            f"Expected L1 after reset, got {current_step}"
+
+    def test_01_secretary_per_document_approve_two_level(self, page: Page):
+        """Secretary per-document approves documents for a two_level step (L1).
+
+        After per-document approval, document review_status should be 'secretary_approved'
+        and step status should become 'secretary_approved'.
+        """
+        # Upload document as applicant
+        login_user(page, TEST_APPLICANT["username"], TEST_APPLICANT["password"])
+        temp_file = create_temp_file(b'%PDF-1.4\nPer-document review test doc')
+        try:
+            upload_result = api_upload_document(page, "L1", temp_file)
+            assert upload_result["status"] == 200, \
+                f"Upload failed: {upload_result}"
+            doc_id = upload_result["body"].get("data", {}).get("id")
+            assert doc_id is not None, "No doc ID returned"
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+        logout_user(page)
+
+        # Secretary per-document approves
+        login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
+        result = api_secretary_review_document(page, doc_id, action="approve")
+        assert result["status"] == 200, \
+            f"Secretary per-doc review failed: {result}"
+        body = result["body"]
+        assert body.get("success") is True, f"Review not successful: {body}"
+        assert body["data"]["review_status"] == "secretary_approved", \
+            f"Expected secretary_approved, got {body['data']['review_status']}"
+
+        # Verify step_status in response reflects secretary_approved
+        step_status = body["data"].get("step_status")
+        assert step_status == "secretary_approved", \
+            f"Expected step_status secretary_approved, got {step_status}"
+
+        logout_user(page)
+
+    def test_02_admin_per_document_approve_two_level(self, page: Page):
+        """Admin per-document approves documents for a two_level step (L1).
+
+        After admin per-document approval, document review_status should be 'admin_approved'
+        and the step should auto-advance to L2.
+        """
+        # Get document IDs via secretary (documents were secretary_approved in previous test)
+        login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
+        app_id = find_test_app_id(page)
+        assert app_id is not None
+        detail = api_get_applicant_detail(page, app_id)
+        docs = detail["body"].get("data", {}).get("documents", [])
+        l1_docs = [d for d in docs if d.get("step_code") == "L1"]
+        assert len(l1_docs) > 0, "No L1 documents found"
+        l1_doc_ids = [d["id"] for d in l1_docs]
+        logout_user(page)
+
+        # Admin per-document approves each L1 document
+        login_user(page, TEST_ADMIN["username"], TEST_ADMIN["password"])
+        for doc_id in l1_doc_ids:
+            result = api_admin_review_document(page, doc_id, action="approve")
+            assert result["status"] == 200, \
+                f"Admin per-doc review failed for doc {doc_id}: {result}"
+            body = result["body"]
+            assert body.get("success") is True, f"Review not successful: {body}"
+            assert body["data"]["review_status"] == "admin_approved", \
+                f"Expected admin_approved, got {body['data']['review_status']}"
+
+        # Verify step has auto-advanced to L2
+        logout_user(page)
+        login_user(page, TEST_APPLICANT["username"], TEST_APPLICANT["password"])
+        progress = api_get_applicant_progress(page)
+        assert progress["status"] == 200
+        data = progress["body"].get("data", {})
+        assert data.get("current_step") == "L2", \
+            f"Expected current_step L2 after auto-advance, got {data.get('current_step')}"
+        logout_user(page)
+
+    def test_03_admin_per_document_approve_one_level(self, page: Page):
+        """Admin per-document approves documents for a one_level step (L2).
+
+        Secretary submits L2, then admin per-document approves.
+        Step should auto-advance when last document is approved.
+        """
+        # Secretary submits L2
+        login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
+        app_id = find_test_app_id(page)
+        assert app_id is not None
+
+        temp_file = create_temp_file(b'%PDF-1.4\nL2 per-document review test')
+        try:
+            submit_result = api_secretary_submit_step(page, app_id, "L2", temp_file)
+            assert submit_result["status"] == 200, \
+                f"Secretary submit failed: {submit_result}"
+            doc_id = submit_result["body"].get("data", {}).get("document_id")
+            assert doc_id is not None, "No document ID returned"
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+        logout_user(page)
+
+        # Admin per-document approves the L2 document
+        login_user(page, TEST_ADMIN["username"], TEST_ADMIN["password"])
+        result = api_admin_review_document(page, doc_id, action="approve")
+        assert result["status"] == 200, \
+            f"Admin per-doc review failed: {result}"
+        body = result["body"]
+        assert body.get("success") is True, f"Review not successful: {body}"
+        assert body["data"]["review_status"] == "admin_approved", \
+            f"Expected admin_approved, got {body['data']['review_status']}"
+
+        # Verify step has auto-advanced to L3
+        logout_user(page)
+        login_user(page, TEST_APPLICANT["username"], TEST_APPLICANT["password"])
+        progress = api_get_applicant_progress(page)
+        assert progress["status"] == 200
+        data = progress["body"].get("data", {})
+        assert data.get("current_step") == "L3", \
+            f"Expected current_step L3 after auto-advance, got {data.get('current_step')}"
+        logout_user(page)
+
+    def test_04_step_does_not_advance_until_all_docs_approved(self, page: Page):
+        """Step does not advance until ALL documents are individually approved.
+
+        Uploads two documents for a two_level step, secretary approves only one,
+        then admin approves only one -- step should NOT advance.
+        """
+        # Reset to L1
+        reset_application_to_l1(page)
+
+        # Upload two documents as applicant
+        login_user(page, TEST_APPLICANT["username"], TEST_APPLICANT["password"])
+        for i in range(2):
+            temp_file = create_temp_file(f'%PDF-1.4\nL1 doc {i+1}'.encode('utf-8'))
+            try:
+                upload_result = api_upload_document(page, "L1", temp_file)
+                assert upload_result["status"] == 200, \
+                    f"Upload {i+1} failed: {upload_result}"
+            finally:
+                if os.path.exists(temp_file):
+                    os.unlink(temp_file)
+        logout_user(page)
+
+        # Secretary per-document approves only the first document
+        login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
+        app_id = find_test_app_id(page)
+        assert app_id is not None
+        detail = api_get_applicant_detail(page, app_id)
+        docs = detail["body"].get("data", {}).get("documents", [])
+        l1_docs = [d for d in docs if d.get("step_code") == "L1"]
+        assert len(l1_docs) >= 2, f"Expected at least 2 L1 docs, got {len(l1_docs)}"
+
+        # Approve only the first document
+        first_doc = l1_docs[0]
+        result = api_secretary_review_document(page, first_doc["id"], action="approve")
+        assert result["status"] == 200, f"Secretary review failed: {result}"
+
+        # Check step status -- should NOT be secretary_approved yet
+        # (because second doc is not approved)
+        detail2 = api_get_applicant_detail(page, app_id)
+        steps = detail2["body"].get("data", {}).get("step_records", [])
+        l1_step = [s for s in steps if s.get("step_code") == "L1"]
+        if l1_step:
+            # Step should be pending (not secretary_approved) since not all docs are approved
+            assert l1_step[0].get("status") != "secretary_approved", \
+                "Step should not be secretary_approved until all docs are individually approved"
+
+        logout_user(page)
+
+        # Now approve the second document -- step should become secretary_approved
+        login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
+        second_doc = l1_docs[1]
+        result2 = api_secretary_review_document(page, second_doc["id"], action="approve")
+        assert result2["status"] == 200, f"Secretary review 2 failed: {result2}"
+
+        # Now step should be secretary_approved
+        detail3 = api_get_applicant_detail(page, app_id)
+        steps3 = detail3["body"].get("data", {}).get("step_records", [])
+        l1_step3 = [s for s in steps3 if s.get("step_code") == "L1"]
+        assert len(l1_step3) > 0, "No L1 step record found"
+        assert l1_step3[0].get("status") == "secretary_approved", \
+            f"Expected secretary_approved after all docs approved, got {l1_step3[0].get('status')}"
+
+        logout_user(page)
+
+    def test_05_auto_advance_when_last_doc_approved(self, page: Page):
+        """Step auto-advances when the last document is admin_approved.
+
+        Continues from test_04: both docs are secretary_approved, now admin
+        approves them one by one. Step should auto-advance after the last one.
+        """
+        # Get the document IDs (both should be secretary_approved from test_04)
+        login_user(page, TEST_SECRETARY["username"], TEST_SECRETARY["password"])
+        app_id = find_test_app_id(page)
+        assert app_id is not None
+        detail = api_get_applicant_detail(page, app_id)
+        docs = detail["body"].get("data", {}).get("documents", [])
+        l1_docs = [d for d in docs if d.get("step_code") == "L1"]
+        assert len(l1_docs) >= 2, f"Expected at least 2 L1 docs, got {len(l1_docs)}"
+        l1_doc_ids = [d["id"] for d in l1_docs]
+        logout_user(page)
+
+        # Admin approves first document -- step should NOT advance yet
+        login_user(page, TEST_ADMIN["username"], TEST_ADMIN["password"])
+        result1 = api_admin_review_document(page, l1_doc_ids[0], action="approve")
+        assert result1["status"] == 200, f"Admin review 1 failed: {result1}"
+
+        # Verify step has NOT advanced yet
+        logout_user(page)
+        login_user(page, TEST_APPLICANT["username"], TEST_APPLICANT["password"])
+        progress = api_get_applicant_progress(page)
+        assert progress["body"]["data"]["current_step"] == "L1", \
+            "Step should not advance until all docs are admin_approved"
+        logout_user(page)
+
+        # Admin approves second document -- step SHOULD auto-advance now
+        login_user(page, TEST_ADMIN["username"], TEST_ADMIN["password"])
+        result2 = api_admin_review_document(page, l1_doc_ids[1], action="approve")
+        assert result2["status"] == 200, f"Admin review 2 failed: {result2}"
+        logout_user(page)
+
+        # Verify step has advanced to L2
+        login_user(page, TEST_APPLICANT["username"], TEST_APPLICANT["password"])
+        progress2 = api_get_applicant_progress(page)
+        assert progress2["status"] == 200
+        data = progress2["body"].get("data", {})
+        assert data.get("current_step") == "L2", \
+            f"Expected current_step L2 after auto-advance, got {data.get('current_step')}"
+        logout_user(page)
 
         logout_user(page)

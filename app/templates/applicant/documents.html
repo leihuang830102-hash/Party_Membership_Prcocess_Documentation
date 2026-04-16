@@ -351,7 +351,7 @@
             <div class="template-item">
                 <div class="template-info">
                     <span class="template-icon">&#128196;</span>
-                    <span class="template-name">{{ template.name }}{% if template.stage %}（第{{ template.stage }}阶段）{% else %}（通用）{% endif %}</span>
+                    <span class="template-name">{{ template.name }}{% if template.stage %}（{% set sn = {1:'入党申请阶段',2:'入党积极分子阶段',3:'发展对象阶段',4:'预备党员接收阶段',5:'预备党员考察和转正阶段'} %}{{ sn.get(template.stage, '第'+template.stage|string+'阶段') }}）{% else %}（通用）{% endif %}</span>
                 </div>
                 <a href="{{ url_for('applicant.download_template', id=template.id) }}" class="btn btn-sm btn-outline" download>
                     下载模板

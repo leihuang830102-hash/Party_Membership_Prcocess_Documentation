@@ -81,7 +81,7 @@
             {% for stage_num in range(1, 6) %}
             <div class="stage-item stage-item-{{ stage_num }}">
                 <div class="stage-number">{{ stage_counts.get(stage_num, 0) }}</div>
-                <div class="stage-label">第{{ stage_num }}阶段</div>
+                <div class="stage-label">{{ stage_names.get(stage_num, '第'+stage_num|string+'阶段') }}</div>
                 <div class="stage-name">{{ stage_names.get(stage_num, '') }}</div>
             </div>
             {% if stage_num < 5 %}

@@ -13,11 +13,11 @@ Usage:
     python seed_templates.py --list       # List current templates in DB
 
 Stage mapping (from StepDefinition convention):
-    L1-L6  -> Stage 1  (递交入党申请书)
-    L7-L12 -> Stage 2  (入党积极分子培养)
-    L13-L14 -> Stage 3 (确定发展对象)
-    L15-L20 -> Stage 4 (接收预备党员)
-    L21-L26 -> Stage 5 (预备党员转正)
+    L1-L2    -> Stage 1  (入党申请阶段)
+    L3-L6    -> Stage 2  (入党积极分子阶段)
+    L7-L10   -> Stage 3  (发展对象阶段)
+    L11-L17  -> Stage 4  (预备党员接收阶段)
+    L18-L26  -> Stage 5  (预备党员考察和转正阶段)
 
 Note: L15 and L26 have no template files.
       L9 and L16 each have two template files.
@@ -83,25 +83,25 @@ def get_stage(step_code):
     except (ValueError, IndexError):
         return None
 
-    if 1 <= num <= 6:
+    if 1 <= num <= 2:
         return 1
-    elif 7 <= num <= 12:
+    elif 3 <= num <= 6:
         return 2
-    elif 13 <= num <= 14:
+    elif 7 <= num <= 10:
         return 3
-    elif 15 <= num <= 20:
+    elif 11 <= num <= 17:
         return 4
-    elif 21 <= num <= 26:
+    elif 18 <= num <= 26:
         return 5
     return None
 
 
 STAGE_NAMES = {
-    1: '递交入党申请书',
-    2: '入党积极分子培养',
-    3: '确定发展对象',
-    4: '接收预备党员',
-    5: '预备党员转正',
+    1: '入党申请阶段',
+    2: '入党积极分子阶段',
+    3: '发展对象阶段',
+    4: '预备党员接收阶段',
+    5: '预备党员考察和转正阶段',
 }
 
 

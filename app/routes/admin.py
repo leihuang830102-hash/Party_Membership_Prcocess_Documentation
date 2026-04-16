@@ -17,7 +17,7 @@ from app.models import User, Branch, Template, Application, StepRecord, StepDefi
 # 导入工作流辅助函数
 # Import workflow helper functions
 try:
-    from app.workflow_helpers import has_required_documents, sync_document_statuses
+    from app.workflow_helpers import has_required_documents, sync_document_statuses, all_documents_approved
     _HAS_WORKFLOW_HELPERS = True
 except ImportError:
     _HAS_WORKFLOW_HELPERS = False
@@ -93,11 +93,11 @@ def dashboard():
     # Count applications by current_stage (only in_progress ones)
     # Maps each of the 5 stages to a display name
     stage_names = {
-        1: '入党申请人',
-        2: '入党积极分子',
-        3: '发展对象',
-        4: '预备党员',
-        5: '转正审批',
+        1: '入党申请阶段',
+        2: '入党积极分子阶段',
+        3: '发展对象阶段',
+        4: '预备党员接收阶段',
+        5: '预备党员考察和转正阶段',
     }
     stage_counts_raw = db.session.query(
         Application.current_stage, func.count(Application.id)
@@ -1152,22 +1152,27 @@ def api_approve_step(app_id):
         db.session.add(step_record)
 
     if action == 'approve':
+        # === 逐个文档审批前置检查：所有文档必须已逐个通过最终审核 ===
+        # Gate check: all documents must have been individually reviewed and
+        # approved at the admin level before step-level approval is allowed.
+        all_approved, status_msg = all_documents_approved(
+            step_code, app_id, required_status='admin_approved'
+        )
+        if not all_approved:
+            return jsonify({
+                'success': False,
+                'message': f'请先审核所有文档（{status_msg}）'
+            }), 400
+
         # 审批通过：标记步骤完成
         step_record.status = 'completed'
         step_record.result = result_text if result_text else '审批通过'
         step_record.completed_at = datetime.utcnow()
         step_record.completed_by = current_user.id
 
-        # 统一审批模型：同步更新该步骤所有文档为 admin_approved
-        sync_document_statuses(app_id, step_code, 'admin_approved')
-        # 记录审核人和审核时间
-        all_docs = Document.query.filter_by(
-            application_id=app_id,
-            step_code=step_code
-        ).all()
-        for doc in all_docs:
-            doc.reviewed_by = current_user.id
-            doc.reviewed_at = datetime.utcnow()
+        # 注意：文档已经是 admin_approved 状态（通过逐个审批完成），
+        # 无需再调用 sync_document_statuses() 批量更新。
+        # 保留 sync_document_statuses 仅作为管理覆盖用。
 
         # 推进到下一步
         next_step = StepDefinition.query.filter(
@@ -1297,26 +1302,20 @@ def api_delete_document(doc_id):
 @admin_required
 def api_review_document(doc_id):
     """
-    [已废弃 / DEPRECATED] 请使用步骤级别审批接口 approve-step 代替。
+    逐文档审批接口 - 管理员对单个文档进行通过或驳回操作。
 
-    此端点已废弃，将在未来版本中移除。新代码应使用步骤级别审批接口
-    POST /admin/api/applications/<app_id>/approve-step，该接口在审批步骤时
-    自动同步处理所有关联文档的审核状态。
+    支持 two_level 和 one_level 两种审批类型:
+    - two_level: 审核状态为 secretary_approved 的文档（书记已审批，管理员最终审批）
+                 Approve -> admin_approved
+                 Reject  -> admin_rejected, 书记可重新提交
+    - one_level: 审核状态为 pending 的文档（书记提交，管理员为唯一审批人）
+                 Approve -> admin_approved
+                 Reject  -> admin_rejected, 书记可重新提交
+    - none:      不通过此接口处理（使用自助服务接口操作）
 
-    保留此端点仅为向后兼容，功能不受影响。
-
-    ---
-    Original docstring (for reference):
-    Review a document (approve or reject) as admin.
-    Supports THREE distinct flows based on step_def.approval_type:
-
-    - two_level: Only reviews docs at secretary_approved status (final approval after secretary)
-                 Approve -> admin_approved, mark step completed, advance.
-                 Reject  -> admin_rejected, secretary can resubmit.
-    - one_level: Reviews docs at pending status (secretary-submitted, admin is sole approver)
-                 Approve -> admin_approved, mark step completed, advance.
-                 Reject  -> admin_rejected, secretary can resubmit.
-    - none:      Not handled here (admin self-service endpoint instead).
+    审批单个文档后，会检查该步骤下的所有文档是否都已通过。
+    如果全部通过，自动完成步骤并推进到下一步。
+    如果任何文档被驳回，将步骤标记为 failed 以便提交者重新上传。
 
     Request body:
     - action: 'approve' or 'reject'
@@ -1324,7 +1323,7 @@ def api_review_document(doc_id):
     """
     document = Document.query.get_or_404(doc_id)
 
-    # Get the associated application
+    # 获取关联的申请
     application = document.application
 
     data = request.get_json()
@@ -1333,6 +1332,13 @@ def api_review_document(doc_id):
 
     if action not in ['approve', 'reject']:
         return jsonify({'success': False, 'message': '无效的操作类型'}), 400
+
+    # 防止重复审核：已审核的文档不允许再次操作
+    if document.review_status in ('admin_approved', 'admin_rejected'):
+        return jsonify({
+            'success': False,
+            'message': f'文档已审核（当前状态: {document.review_status}），不可重复操作'
+        }), 400
 
     # 查找对应的步骤定义以确定审批类型
     step_def = None
@@ -1369,7 +1375,7 @@ def api_review_document(doc_id):
     document.reviewed_at = datetime.utcnow()
     document.review_comment = comment if comment else None
 
-    # 如果文档关联了某个步骤，同步更新步骤记录
+    # 检查该步骤下所有文档的审核状态，决定步骤是否可以推进
     if document.step_code:
         step_record = StepRecord.query.filter_by(
             application_id=application.id,
@@ -1377,27 +1383,43 @@ def api_review_document(doc_id):
         ).first()
 
         if step_record:
+            # 查询该步骤下所有文档
+            all_step_docs = Document.query.filter_by(
+                application_id=application.id,
+                step_code=document.step_code
+            ).all()
+
             if action == 'reject':
+                # 任何文档被驳回，步骤标记为 failed，提交者可重新上传
                 step_record.status = 'failed'
                 step_record.result = f'文档审核不通过: {comment}' if comment else '文档审核不通过'
             else:
-                # 审核通过：标记步骤完成
-                step_record.status = 'completed'
-                step_record.result = f'文档审核通过: {comment}' if comment else '文档审核通过'
-                step_record.completed_at = datetime.utcnow()
-                step_record.completed_by = current_user.id
+                # 文档通过，检查是否所有文档都已 admin_approved
+                all_approved = all(
+                    d.review_status == 'admin_approved' for d in all_step_docs
+                )
 
-                # 如果该步骤是申请的当前步骤，则推进到下一步
-                if application.current_step == document.step_code:
-                    if step_def:
-                        next_step = StepDefinition.query.filter(
-                            StepDefinition.order_num > step_def.order_num
-                        ).order_by(StepDefinition.order_num).first()
-                        if next_step:
-                            application.current_step = next_step.step_code
-                            application.current_stage = next_step.stage
-                        else:
-                            application.status = 'completed'
+                if all_approved:
+                    # 所有文档都通过了，自动完成步骤并推进
+                    step_record.status = 'completed'
+                    step_record.result = '所有文档审核通过'
+                    step_record.completed_at = datetime.utcnow()
+                    step_record.completed_by = current_user.id
+
+                    # 如果该步骤是申请的当前步骤，则推进到下一步
+                    if application.current_step == document.step_code:
+                        if step_def:
+                            next_step = StepDefinition.query.filter(
+                                StepDefinition.order_num > step_def.order_num
+                            ).order_by(StepDefinition.order_num).first()
+                            if next_step:
+                                application.current_step = next_step.step_code
+                                application.current_stage = next_step.stage
+                            else:
+                                application.status = 'completed'
+                else:
+                    # 还有未审核的文档，步骤保持 in_progress 不变
+                    pass
 
     db.session.commit()
 

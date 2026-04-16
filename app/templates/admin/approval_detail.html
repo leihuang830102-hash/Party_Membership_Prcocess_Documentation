@@ -40,7 +40,7 @@
                 </div>
                 <div class="info-item">
                     <span class="info-label">当前阶段</span>
-                    <span class="info-value">第{{ application.current_stage }}阶段</span>
+                    <span class="info-value">{% set sn = {1:'入党申请阶段',2:'入党积极分子阶段',3:'发展对象阶段',4:'预备党员接收阶段',5:'预备党员考察和转正阶段'} %}{{ sn.get(application.current_stage, '第'+application.current_stage|string+'阶段') }}</span>
                 </div>
                 <div class="info-item">
                     <span class="info-label">当前步骤</span>
@@ -95,7 +95,7 @@
                         <div class="timeline-header">
                             <span class="step-code">{{ step.step_code }}</span>
                             <span class="step-name">{{ step.name }}</span>
-                            <span class="stage-badge">第{{ step.stage }}阶段</span>
+                            <span class="stage-badge">{% set sn = {1:'入党申请阶段',2:'入党积极分子阶段',3:'发展对象阶段',4:'预备党员接收阶段',5:'预备党员考察和转正阶段'} %}{{ sn.get(step.stage, '第'+step.stage|string+'阶段') }}</span>
                         </div>
                         <div class="timeline-body">
                             {% if step.status == 'completed' %}
@@ -171,8 +171,12 @@
                         {% endif %}
                     </div>
                     <div class="doc-review-actions">
-                        {# Admin can always review documents that are pending or secretary-approved #}
-                        {% if doc.review_status == 'pending' or not doc.review_status or doc.review_status == 'secretary_approved' %}
+                        {# Admin can review documents that are pending or secretary-approved #}
+                        {% if doc.review_status == 'admin_approved' %}
+                        <span class="badge badge-success" style="padding: 4px 10px;">已审核</span>
+                        {% elif doc.review_status == 'admin_rejected' %}
+                        <span class="badge badge-danger" style="padding: 4px 10px;">已驳回</span>
+                        {% elif doc.review_status == 'pending' or not doc.review_status or doc.review_status == 'secretary_approved' %}
                         <button class="btn btn-sm btn-success btn-admin-review-doc"
                                 data-doc-id="{{ doc.id }}"
                                 data-action="approve"
@@ -180,7 +184,9 @@
                         <button class="btn btn-sm btn-danger btn-admin-review-doc"
                                 data-doc-id="{{ doc.id }}"
                                 data-action="reject"
-                                title="驳回文档">驳回</button>
+                                title="驳回文档">退回</button>
+                        <input type="text" class="doc-reject-input-detail" id="reject-comment-{{ doc.id }}"
+                               placeholder="退回原因（退回时填写）" style="display:none;">
                         {% endif %}
                         {# Admin can always delete any document #}
                         <button class="btn btn-sm btn-admin-delete-doc"
@@ -500,6 +506,21 @@
     display: flex;
     gap: 4px;
     flex-shrink: 0;
+    align-items: center;
+}
+
+/* 退回原因输入框（审批详情页） */
+.doc-reject-input-detail {
+    padding: 4px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    font-size: 0.8125rem;
+    width: 140px;
+}
+
+.doc-reject-input-detail:focus {
+    outline: none;
+    border-color: var(--color-primary);
 }
 
 /* 按钮颜色变体 */
@@ -531,23 +552,42 @@
 
 <script>
 /**
- * Admin document review - approve/reject documents
+ * Admin document review - approve/reject documents individually
+ * Uses inline comment input for rejections instead of browser prompt().
  */
 document.querySelectorAll('.btn-admin-review-doc').forEach(function(btn) {
     btn.addEventListener('click', function() {
         var docId = this.dataset.docId;
         var action = this.dataset.action;
-        var actionLabel = action === 'approve' ? '通过' : '驳回';
+        var actionLabel = action === 'approve' ? '通过' : '退回';
 
-        var comment = '';
         if (action === 'reject') {
-            comment = prompt('请输入驳回原因:');
-            if (comment === null) return; // user cancelled
+            // 显示退回原因输入框（内联方式，而非浏览器 prompt）
+            var input = document.getElementById('reject-comment-' + docId);
+            if (input) {
+                if (input.style.display === 'none' || input.style.display === '') {
+                    input.style.display = 'inline-block';
+                    input.focus();
+                    return; // 第一次点击：显示输入框，等待用户输入原因
+                }
+                // 输入框已显示，检查是否有内容
+                if (!input.value.trim()) {
+                    input.focus();
+                    return;
+                }
+            }
         } else {
             if (!confirm('确认审核' + actionLabel + '该文档？')) return;
         }
 
-        // Disable both review buttons for this document
+        // 获取退回原因
+        var comment = '';
+        if (action === 'reject') {
+            var inputEl = document.getElementById('reject-comment-' + docId);
+            comment = inputEl ? inputEl.value : '';
+        }
+
+        // 禁用该文档的操作按钮防止重复提交
         var siblingBtns = this.parentElement.querySelectorAll('.btn-admin-review-doc');
         siblingBtns.forEach(function(b) { b.disabled = true; });
 

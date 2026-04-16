@@ -91,7 +91,7 @@
                             <td>{{ item.branch.name if item.branch else '-' }}</td>
                             <td>
                                 <div class="stage-info">
-                                    <span class="stage-badge">第{{ item.current_stage or 1 }}阶段</span>
+                                    <span class="stage-badge">{% set sn = {1:'入党申请阶段',2:'入党积极分子阶段',3:'发展对象阶段',4:'预备党员接收阶段',5:'预备党员考察和转正阶段'} %}{{ sn.get(item.current_stage or 1, '未知阶段') }}</span>
                                     {% if item.current_step %}
                                     <span class="step-text">/ {{ item.current_step }}</span>
                                     {% endif %}
