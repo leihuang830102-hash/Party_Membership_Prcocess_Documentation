@@ -73,5 +73,147 @@
 
     <!-- 额外脚本 -->
     {% block extra_js %}{% endblock %}
+
+    {# 文档在线预览模态框 - 全局组件，书记和管理员页面复用 #}
+    <div id="docPreviewModal" class="preview-modal" style="display:none;">
+        <div class="preview-overlay" onclick="closePreview()"></div>
+        <div class="preview-container">
+            <div class="preview-header">
+                <span id="previewFileName" class="preview-filename"></span>
+                <div class="preview-toolbar">
+                    <button class="preview-btn" id="btnPrevPage" onclick="previewPrevPage()" title="上一页">&#9664; 上一页</button>
+                    <span id="previewPageInfo" class="preview-page-info"></span>
+                    <button class="preview-btn" id="btnNextPage" onclick="previewNextPage()" title="下一页">下一页 &#9654;</button>
+                    <span class="preview-divider">|</span>
+                    <button class="preview-btn" onclick="previewZoomIn()" title="放大">+</button>
+                    <button class="preview-btn" onclick="previewZoomOut()" title="缩小">-</button>
+                    <a id="previewDownloadLink" class="preview-btn preview-download" href="#" download>下载</a>
+                    <button class="preview-btn preview-close-btn" onclick="closePreview()" title="关闭">&#10005;</button>
+                </div>
+            </div>
+            <div class="preview-body" id="previewBody">
+                <canvas id="pdfCanvas"></canvas>
+                <img id="previewImage" style="display:none; max-width:100%; max-height:100%; object-fit:contain;">
+                <div id="previewUnsupported" style="display:none;" class="preview-unsupported">
+                    <p>该格式不支持在线预览</p>
+                    <a id="previewFallbackDownload" class="btn btn-primary" href="#">下载文件</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <style>
+    /* 文档预览模态框 */
+    .preview-modal { position:fixed; top:0; left:0; width:100%; height:100%; z-index:10000; display:flex; align-items:center; justify-content:center; }
+    .preview-overlay { position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); }
+    .preview-container { position:relative; width:92vw; height:90vh; background:#fff; border-radius:8px; display:flex; flex-direction:column; box-shadow:0 8px 32px rgba(0,0,0,0.3); z-index:1; }
+    .preview-header { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; border-bottom:1px solid #e0e0e0; background:#f8f9fa; border-radius:8px 8px 0 0; flex-shrink:0; flex-wrap:wrap; gap:8px; }
+    .preview-filename { font-weight:600; font-size:0.95rem; color:#333; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .preview-toolbar { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    .preview-btn { background:none; border:1px solid #ccc; border-radius:4px; padding:4px 10px; cursor:pointer; font-size:0.85rem; color:#555; text-decoration:none; display:inline-flex; align-items:center; }
+    .preview-btn:hover { background:#e8e8e8; }
+    .preview-btn:disabled { opacity:0.4; cursor:default; }
+    .preview-page-info { font-size:0.85rem; color:#666; min-width:80px; text-align:center; }
+    .preview-divider { color:#ccc; margin:0 4px; }
+    .preview-close-btn { font-size:1.2rem; padding:4px 8px; color:#c62828; }
+    .preview-download { color:#2e7d32; border-color:#2e7d32; }
+    .preview-body { flex:1; overflow:auto; display:flex; align-items:center; justify-content:center; background:#525659; padding:10px; }
+    .preview-body canvas { max-width:100%; height:auto; }
+    .preview-unsupported { text-align:center; color:#fff; }
+    .preview-unsupported p { font-size:1.2rem; margin-bottom:16px; }
+    .preview-unsupported .btn { color:#fff; }
+    </style>
+
+    <script src="{{ url_for('static', filename='lib/pdf.js/pdf.min.js') }}"></script>
+    <script>
+    // PDF.js 初始化
+    if (typeof pdfjsLib !== 'undefined') {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '{{ url_for("static", filename="lib/pdf.js/pdf.worker.min.js") }}';
+    }
+
+    var _pdfDoc = null;
+    var _pdfPage = 1;
+    var _pdfScale = 1.5;
+
+    /**
+     * 打开文档预览模态框
+     * @param {number} docId - 文档ID
+     * @param {string} fileName - 显示文件名
+     * @param {string} previewUrl - 预览接口URL
+     * @param {string} downloadUrl - 下载链接URL
+     */
+    function openPreview(docId, fileName, previewUrl, downloadUrl) {
+        var modal = document.getElementById('docPreviewModal');
+        var canvas = document.getElementById('pdfCanvas');
+        var img = document.getElementById('previewImage');
+        var unsupported = document.getElementById('previewUnsupported');
+        var nameEl = document.getElementById('previewFileName');
+        var dlLink = document.getElementById('previewDownloadLink');
+
+        nameEl.textContent = fileName;
+        dlLink.href = downloadUrl;
+        canvas.style.display = 'none';
+        img.style.display = 'none';
+        unsupported.style.display = 'none';
+
+        var ext = fileName.split('.').pop().toLowerCase();
+
+        if (ext === 'pdf') {
+            _pdfDoc = null;
+            _pdfPage = 1;
+            _pdfScale = 1.5;
+            canvas.style.display = 'block';
+            pdfjsLib.getDocument(previewUrl).promise.then(function(pdf) {
+                _pdfDoc = pdf;
+                renderPdfPage(_pdfPage);
+            }).catch(function(err) {
+                console.error('PDF load error:', err);
+                canvas.style.display = 'none';
+                unsupported.style.display = 'block';
+            });
+        } else if (ext === 'jpg' || ext === 'jpeg' || ext === 'png') {
+            img.style.display = 'block';
+            img.src = previewUrl;
+        } else {
+            unsupported.style.display = 'block';
+        }
+
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closePreview() {
+        document.getElementById('docPreviewModal').style.display = 'none';
+        document.body.style.overflow = '';
+        _pdfDoc = null;
+        var canvas = document.getElementById('pdfCanvas');
+        canvas.getContext('2d').clearRect(0, 0, 1, 1);
+        document.getElementById('previewImage').src = '';
+    }
+
+    function renderPdfPage(num) {
+        if (!_pdfDoc) return;
+        _pdfDoc.getPage(num).then(function(page) {
+            var canvas = document.getElementById('pdfCanvas');
+            var ctx = canvas.getContext('2d');
+            var viewport = page.getViewport({ scale: _pdfScale });
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            page.render({ canvasContext: ctx, viewport: viewport }).promise.then(function() {
+                document.getElementById('previewPageInfo').textContent = num + ' / ' + _pdfDoc.numPages;
+                document.getElementById('btnPrevPage').disabled = (num <= 1);
+                document.getElementById('btnNextPage').disabled = (num >= _pdfDoc.numPages);
+            });
+        });
+    }
+
+    function previewPrevPage() { if (_pdfPage > 1) { _pdfPage--; renderPdfPage(_pdfPage); } }
+    function previewNextPage() { if (_pdfDoc && _pdfPage < _pdfDoc.numPages) { _pdfPage++; renderPdfPage(_pdfPage); } }
+    function previewZoomIn() { _pdfScale = Math.min(_pdfScale + 0.3, 4); renderPdfPage(_pdfPage); }
+    function previewZoomOut() { _pdfScale = Math.max(_pdfScale - 0.3, 0.5); renderPdfPage(_pdfPage); }
+
+    // ESC 关闭预览
+    document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closePreview(); });
+    </script>
 </body>
 </html>

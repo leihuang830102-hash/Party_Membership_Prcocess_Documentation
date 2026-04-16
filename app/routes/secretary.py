@@ -1146,6 +1146,43 @@ def api_delete_document(id):
         }), 500
 
 
+@secretary_bp.route('/api/documents/<int:doc_id>/preview')
+@login_required
+def preview_document(doc_id):
+    """在线预览文档（PDF/图片内联显示，不下载）
+    仅支持 PDF 和图片格式（jpg/jpeg/png），书记和管理员可用。
+    """
+    if current_user.role not in ('secretary', 'admin'):
+        return jsonify({'success': False, 'message': '无权访问'}), 403
+
+    doc = Document.query.get_or_404(doc_id)
+
+    # 文件扩展名检查
+    ext = os.path.splitext(doc.filename)[1].lower()
+    supported = {'.pdf', '.jpg', '.jpeg', '.png'}
+    if ext not in supported:
+        return jsonify({'success': False, 'message': f'该格式（{ext}）不支持在线预览，请下载查看'}), 415
+
+    # 文件存在性检查
+    if not os.path.exists(doc.file_path):
+        return jsonify({'success': False, 'message': '文件不存在'}), 404
+
+    # MIME 类型映射
+    mime_map = {
+        '.pdf': 'application/pdf',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+    }
+
+    from flask import send_file
+    return send_file(
+        doc.file_path,
+        as_attachment=False,
+        mimetype=mime_map.get(ext, 'application/octet-stream')
+    )
+
+
 @secretary_bp.route('/api/applicants/<int:id>/set-contact', methods=['POST'])
 @secretary_required
 def api_set_contact_person(id):

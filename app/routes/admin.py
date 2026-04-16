@@ -1041,6 +1041,40 @@ def download_document(doc_id):
     )
 
 
+@admin_bp.route('/api/documents/<int:doc_id>/preview')
+@login_required
+def preview_document(doc_id):
+    """管理员在线预览文档（PDF/图片内联显示）
+    仅支持 PDF 和图片格式（jpg/jpeg/png）
+    """
+    if current_user.role != 'admin':
+        return jsonify({'success': False, 'message': '无权访问'}), 403
+
+    doc = Document.query.get_or_404(doc_id)
+
+    ext = os.path.splitext(doc.filename)[1].lower()
+    supported = {'.pdf', '.jpg', '.jpeg', '.png'}
+    if ext not in supported:
+        return jsonify({'success': False, 'message': f'该格式（{ext}）不支持在线预览，请下载查看'}), 415
+
+    if not os.path.exists(doc.file_path):
+        return jsonify({'success': False, 'message': '文件不存在'}), 404
+
+    mime_map = {
+        '.pdf': 'application/pdf',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+    }
+
+    from flask import send_file as _send_file
+    return _send_file(
+        doc.file_path,
+        as_attachment=False,
+        mimetype=mime_map.get(ext, 'application/octet-stream')
+    )
+
+
 # ==================== Step Approval API (unified) ====================
 # 统一步骤审批接口：管理员审批/驳回整个步骤，自动处理所有关联文档
 # Unified step approval: admin approves/rejects the entire step,

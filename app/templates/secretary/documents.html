@@ -319,6 +319,13 @@ async function loadDocuments() {
                         </div>`;
                 }
 
+                // Build preview button for PDF/image files
+                var previewBtn = '';
+                if (doc.filename && /\.(pdf|jpg|jpeg|png)$/i.test(doc.filename)) {
+                    var safeName = escapeHtml(doc.original_filename || doc.filename).replace(/'/g, "\\'");
+                    previewBtn = '<a href="#" onclick="openPreview(' + doc.id + ', \'' + safeName + '\', \'' + '/secretary/api/documents/' + doc.id + '/preview' + '\', \'' + '/admin/documents/' + doc.id + '/download' + '\'); return false;" class="btn btn-sm btn-outline" style="margin-right:4px;">预览</a>';
+                }
+
                 return `
                 <div class="document-card" id="doc-card-${doc.id}">
                     <div class="document-icon">
@@ -334,6 +341,7 @@ async function loadDocuments() {
                                 <span class="status-badge status-${getStatusClass(doc.status)}">${getStatusText(doc.status)}</span>
                             </div>
                     </div>
+                    ${previewBtn}
                     ${reviewButtons}
                 </div>`;
             }).join('');

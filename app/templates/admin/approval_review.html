@@ -296,6 +296,10 @@
                         <input type="text" class="doc-reject-input" id="reject-comment-{{ doc.id }}"
                                placeholder="退回原因（退回时填写）" style="display:none;">
                         {% endif %}
+                        {% set doc_ext = doc.filename.split('.')[-1].lower() %}
+                        {% if doc_ext in ['pdf', 'jpg', 'jpeg', 'png'] %}
+                        <a href="#" onclick="openPreview({{ doc.id }}, '{{ (doc.original_filename or doc.filename)|e }}', '/admin/api/documents/{{ doc.id }}/preview', '/admin/documents/{{ doc.id }}/download'); return false;" class="btn btn-sm btn-outline">预览</a>
+                        {% endif %}
                         <a href="{{ url_for('admin.download_document', doc_id=doc.id) }}" class="btn btn-sm btn-outline">下载</a>
                     </div>
                 </div>

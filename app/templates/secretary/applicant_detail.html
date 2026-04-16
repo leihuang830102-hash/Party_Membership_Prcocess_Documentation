@@ -295,6 +295,11 @@
                         <span class="doc-review-comment" title="{{ doc.review_comment }}">退回原因: {{ doc.review_comment }}</span>
                         {% endif %}
                     </div>
+                    {# 预览按钮 - 仅对 PDF 和图片文件显示 #}
+                    {% set doc_ext = doc.filename.split('.')[-1].lower() %}
+                    {% if doc_ext in ['pdf', 'jpg', 'jpeg', 'png'] %}
+                    <a href="#" onclick="openPreview({{ doc.id }}, '{{ (doc.original_filename or doc.filename)|e }}', '/secretary/api/documents/{{ doc.id }}/preview', '/admin/documents/{{ doc.id }}/download'); return false;" class="btn btn-sm btn-outline">预览</a>
+                    {% endif %}
                     {# 文档审核状态徽章 + 操作按钮 #}
                     <div class="doc-review-status">
                         {% if doc.review_status == 'admin_approved' %}
